@@ -52,5 +52,6 @@ coverage
 *.tgz
 .cache
 .superpowers
+.worktrees/
 tmp
 temp

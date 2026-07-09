@@ -19,6 +19,7 @@ import type {
 import { createId } from "./repository";
 
 type XiaohongshuDatabase = typeof defaultDb;
+const activeUserUniqueIndexName = "xhs_publish_task_active_user_unique";
 
 const requireReturnedRow = <Row>(row: Row | undefined, action: string): Row => {
 	if (!row) {
@@ -26,6 +27,26 @@ const requireReturnedRow = <Row>(row: Row | undefined, action: string): Row => {
 	}
 
 	return row;
+};
+
+const hasProperty = <Key extends string>(
+	value: unknown,
+	key: Key
+): value is Record<Key, unknown> =>
+	typeof value === "object" && value !== null && key in value;
+
+const isActiveUserUniqueViolation = (error: unknown): boolean => {
+	if (!hasProperty(error, "code") || error.code !== "23505") {
+		return false;
+	}
+
+	if (hasProperty(error, "constraint")) {
+		return error.constraint === activeUserUniqueIndexName;
+	}
+
+	return (
+		hasProperty(error, "index") && error.index === activeUserUniqueIndexName
+	);
 };
 
 const accountConfigInsertValues = (
@@ -131,6 +152,36 @@ export function createDbXiaohongshuPublisherRepository(
 				.returning();
 
 			return requireReturnedRow(log, "add task log");
+		},
+
+		async claimTaskForPublish(
+			userId: string,
+			taskId: string
+		): Promise<XiaohongshuPublishTaskRow | null> {
+			try {
+				const [task] = await database
+					.update(xhsPublishTask)
+					.set({
+						status: "validating",
+						updatedAt: new Date(),
+					})
+					.where(
+						and(
+							eq(xhsPublishTask.id, taskId),
+							eq(xhsPublishTask.userId, userId),
+							eq(xhsPublishTask.status, "created")
+						)
+					)
+					.returning();
+
+				return task ?? null;
+			} catch (error) {
+				if (isActiveUserUniqueViolation(error)) {
+					return null;
+				}
+
+				throw error;
+			}
 		},
 
 		async createTask(

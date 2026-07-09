@@ -8,7 +8,7 @@ import type {
 	XiaohongshuPublishTaskLogRow,
 	XiaohongshuPublishTaskRow,
 } from "./repository";
-import { createId } from "./repository";
+import { activeXiaohongshuPublishTaskStatuses, createId } from "./repository";
 
 const cloneDate = (date: Date): Date => new Date(date.getTime());
 
@@ -86,6 +86,13 @@ const cloneLog = (
 	metadata: cloneMetadata(log.metadata),
 });
 
+const isActivePublishTaskStatus = (
+	status: XiaohongshuPublishTaskRow["status"]
+): boolean =>
+	activeXiaohongshuPublishTaskStatuses.some(
+		(activeStatus) => activeStatus === status
+	);
+
 export function createMemoryXiaohongshuPublisherRepository(): XiaohongshuPublisherRepository {
 	const accountConfigsByUserId = new Map<string, XiaohongshuAccountConfigRow>();
 	const taskLogsByTaskId = new Map<string, XiaohongshuPublishTaskLogRow[]>();
@@ -119,6 +126,36 @@ export function createMemoryXiaohongshuPublisherRepository(): XiaohongshuPublish
 			taskLogsByTaskId.set(input.taskId, [...logs, log]);
 
 			return Promise.resolve(cloneLog(log));
+		},
+
+		claimTaskForPublish: (
+			userId: string,
+			taskId: string
+		): Promise<XiaohongshuPublishTaskRow | null> => {
+			const existing = tasksById.get(taskId);
+			if (
+				!existing ||
+				existing.userId !== userId ||
+				existing.status !== "created"
+			) {
+				return Promise.resolve(null);
+			}
+			const hasActiveTaskForUser = [...tasksById.values()].some(
+				(task) =>
+					task.userId === userId && isActivePublishTaskStatus(task.status)
+			);
+			if (hasActiveTaskForUser) {
+				return Promise.resolve(null);
+			}
+
+			const updated: XiaohongshuPublishTaskRow = {
+				...existing,
+				status: "validating",
+				updatedAt: createTimestamp(),
+			};
+			tasksById.set(taskId, updated);
+
+			return Promise.resolve(cloneTask(updated));
 		},
 
 		createTask: (

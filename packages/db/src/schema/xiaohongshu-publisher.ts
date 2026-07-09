@@ -1,4 +1,4 @@
-import { relations } from "drizzle-orm";
+import { relations, sql } from "drizzle-orm";
 import {
 	index,
 	jsonb,
@@ -107,6 +107,11 @@ export const xhsPublishTask = pgTable(
 		index("xhs_publish_task_user_id_idx").on(table.userId),
 		index("xhs_publish_task_status_idx").on(table.status),
 		index("xhs_publish_task_created_at_idx").on(table.createdAt),
+		uniqueIndex("xhs_publish_task_active_user_unique")
+			.on(table.userId)
+			.where(
+				sql`${table.status} in ('validating', 'opening_browser', 'checking_login', 'uploading_media', 'filling_form', 'submitting', 'verifying_result')`
+			),
 	]
 );
 

@@ -1,3 +1,6 @@
+import { readdirSync, readFileSync } from "node:fs";
+import { join } from "node:path";
+
 import {
 	xhsAccountConfig,
 	xhsAccountConfigRelations,
@@ -9,6 +12,10 @@ import {
 import { getTableName } from "drizzle-orm";
 import { getTableConfig } from "drizzle-orm/pg-core";
 import { describe, expect, it } from "vitest";
+
+import { activeXiaohongshuPublishTaskStatuses } from "./repository";
+
+const migrationsDirectory = join(process.cwd(), "packages/db/src/migrations");
 
 const hasColumnName = (value: unknown): value is { name: string } => {
 	if (typeof value !== "object" || value === null || !("name" in value)) {
@@ -26,6 +33,15 @@ const getIndexColumnName = (column: unknown): string => {
 
 	throw new Error("Expected index column to expose a string name.");
 };
+
+const getMigrationSql = (): string =>
+	readdirSync(migrationsDirectory)
+		.filter((fileName) => fileName.endsWith(".sql"))
+		.sort()
+		.map((fileName) =>
+			readFileSync(join(migrationsDirectory, fileName), "utf8")
+		)
+		.join("\n");
 
 describe("xiaohongshu publisher database schema", () => {
 	it("exports the expected table names", () => {
@@ -124,6 +140,7 @@ describe("xiaohongshu publisher database schema", () => {
 			columns: index.config.columns.map(getIndexColumnName),
 			name: index.config.name,
 			unique: index.config.unique,
+			where: index.config.where,
 		}));
 
 		expect(indexConfigs).toEqual(
@@ -145,6 +162,24 @@ describe("xiaohongshu publisher database schema", () => {
 				},
 			])
 		);
+		expect(indexConfigs).toContainEqual({
+			columns: ["user_id"],
+			name: "xhs_publish_task_active_user_unique",
+			unique: true,
+			where: expect.anything(),
+		});
+	});
+
+	it("creates a partial unique index for one active publish task per user", () => {
+		const migrationSql = getMigrationSql();
+
+		expect(migrationSql).toContain(
+			'CREATE UNIQUE INDEX "xhs_publish_task_active_user_unique"'
+		);
+		expect(migrationSql).toContain("WHERE");
+		for (const status of activeXiaohongshuPublishTaskStatuses) {
+			expect(migrationSql).toContain(status);
+		}
 	});
 
 	it("keeps publish task log lookup indexes", () => {

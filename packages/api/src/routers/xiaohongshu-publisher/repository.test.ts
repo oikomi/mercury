@@ -1,9 +1,15 @@
-import { xhsAccountConfig } from "@mercury/db/schema/xiaohongshu-publisher";
+import {
+	xhsAccountConfig,
+	xhsPublishTask,
+} from "@mercury/db/schema/xiaohongshu-publisher";
 import { describe, expect, it, vi } from "vitest";
 
 import { createDbXiaohongshuPublisherRepository } from "./db-repository";
 import { createMemoryXiaohongshuPublisherRepository } from "./memory-repository";
-import type { XiaohongshuPublishTaskRow } from "./repository";
+import {
+	activeXiaohongshuPublishTaskStatuses,
+	type XiaohongshuPublishTaskRow,
+} from "./repository";
 
 vi.mock("@mercury/db", () => ({
 	db: {},
@@ -35,6 +41,31 @@ const createTaskInput = {
 	userId,
 	visibility: "public",
 } as const;
+
+const createTaskRow = (
+	overrides: Partial<XiaohongshuPublishTaskRow> = {}
+): XiaohongshuPublishTaskRow => {
+	const now = new Date("2026-01-01T00:00:00.000Z");
+
+	return {
+		content: createTaskInput.content,
+		createdAt: now,
+		debugScreenshotPath: null,
+		errorCode: null,
+		errorMessage: null,
+		id: "xhs_publish_task_1",
+		media: [...createTaskInput.media],
+		publishedAt: null,
+		resultUrl: null,
+		status: "created",
+		title: createTaskInput.title,
+		topics: [...createTaskInput.topics],
+		updatedAt: now,
+		userId,
+		visibility: createTaskInput.visibility,
+		...overrides,
+	};
+};
 
 const asInjectedDatabase = (database: unknown): DatabaseParameter =>
 	database as DatabaseParameter;
@@ -95,6 +126,60 @@ const createFakeListTasksDatabase = (tasks: XiaohongshuPublishTaskRow[]) => {
 	};
 };
 
+const createFakeClaimTaskDatabase = (
+	returnedTask: XiaohongshuPublishTaskRow | null
+) => {
+	let updateTable: unknown;
+	let updateSet: Record<string, unknown> | null = null;
+	let updateWhere: unknown;
+	const database = {
+		update: (table: unknown) => {
+			updateTable = table;
+
+			return {
+				set: (set: Record<string, unknown>) => {
+					updateSet = set;
+
+					return {
+						where: (where: unknown) => {
+							updateWhere = where;
+
+							return {
+								returning: (): Promise<XiaohongshuPublishTaskRow[]> =>
+									Promise.resolve(returnedTask ? [returnedTask] : []),
+							};
+						},
+					};
+				},
+			};
+		},
+	};
+
+	return {
+		database: asInjectedDatabase(database),
+		getUpdateSet: (): Record<string, unknown> | null => updateSet,
+		getUpdateTable: (): unknown => updateTable,
+		getUpdateWhere: (): unknown => updateWhere,
+	};
+};
+
+const createFakeRejectingClaimTaskDatabase = (error: unknown) => {
+	const database = {
+		update: (_table: unknown) => ({
+			set: (_set: unknown) => ({
+				where: (_where: unknown) => ({
+					returning: (): Promise<XiaohongshuPublishTaskRow[]> =>
+						Promise.reject(error),
+				}),
+			}),
+		}),
+	};
+
+	return {
+		database: asInjectedDatabase(database),
+	};
+};
+
 describe("memory Xiaohongshu publisher repository", () => {
 	it("creates and reads a publish task with logs", async () => {
 		const repository = createMemoryXiaohongshuPublisherRepository();
@@ -112,6 +197,60 @@ describe("memory Xiaohongshu publisher repository", () => {
 
 		expect(found?.task.title).toBe("标题");
 		expect(found?.logs).toHaveLength(1);
+	});
+
+	it("claims a created task for publish only once and only for the owner", async () => {
+		const repository = createMemoryXiaohongshuPublisherRepository();
+		const task = await repository.createTask(createTaskInput);
+
+		const claimed = await repository.claimTaskForPublish(userId, task.id);
+		const secondClaim = await repository.claimTaskForPublish(userId, task.id);
+		const otherUserClaim = await repository.claimTaskForPublish(
+			"user-2",
+			task.id
+		);
+
+		expect(claimed?.status).toBe("validating");
+		expect(claimed?.updatedAt.getTime()).toBeGreaterThanOrEqual(
+			task.updatedAt.getTime()
+		);
+		expect(secondClaim).toBeNull();
+		expect(otherUserClaim).toBeNull();
+	});
+
+	it("claims only one active publish task per user", async () => {
+		const repository = createMemoryXiaohongshuPublisherRepository();
+		const firstTask = await repository.createTask({
+			...createTaskInput,
+			title: "第一篇",
+		});
+		const secondTask = await repository.createTask({
+			...createTaskInput,
+			title: "第二篇",
+		});
+		const otherUserTask = await repository.createTask({
+			...createTaskInput,
+			title: "其他用户",
+			userId: "user-2",
+		});
+
+		const firstClaim = await repository.claimTaskForPublish(
+			userId,
+			firstTask.id
+		);
+		const secondClaim = await repository.claimTaskForPublish(
+			userId,
+			secondTask.id
+		);
+		const otherUserClaim = await repository.claimTaskForPublish(
+			"user-2",
+			otherUserTask.id
+		);
+
+		expect(activeXiaohongshuPublishTaskStatuses).toContain("validating");
+		expect(firstClaim?.status).toBe("validating");
+		expect(secondClaim).toBeNull();
+		expect(otherUserClaim?.status).toBe("validating");
 	});
 
 	it("updates task status and result", async () => {
@@ -319,5 +458,69 @@ describe("db Xiaohongshu publisher repository", () => {
 		await repository.listTasks(userId, 2);
 
 		expect(getQueryLimit()).toBe(2);
+	});
+
+	it("claims a task with a conditional update", async () => {
+		const claimedTask = createTaskRow({ status: "validating" });
+		const { database, getUpdateSet, getUpdateTable, getUpdateWhere } =
+			createFakeClaimTaskDatabase(claimedTask);
+		const repository = createDbXiaohongshuPublisherRepository(database);
+
+		const claimed = await repository.claimTaskForPublish(
+			userId,
+			claimedTask.id
+		);
+
+		expect(claimed).toBe(claimedTask);
+		expect(getUpdateTable()).toBe(xhsPublishTask);
+		expect(getUpdateSet()).toEqual(
+			expect.objectContaining({
+				status: "validating",
+				updatedAt: expect.any(Date),
+			})
+		);
+		expect(getUpdateWhere()).toBeDefined();
+	});
+
+	it("returns null when the claim conditional update returns no rows", async () => {
+		const { database } = createFakeClaimTaskDatabase(null);
+		const repository = createDbXiaohongshuPublisherRepository(database);
+
+		const claimed = await repository.claimTaskForPublish(
+			userId,
+			"xhs_publish_task_missing"
+		);
+
+		expect(claimed).toBeNull();
+	});
+
+	it("returns null when the active task unique index rejects a claim", async () => {
+		const { database } = createFakeRejectingClaimTaskDatabase({
+			code: "23505",
+			constraint: "xhs_publish_task_active_user_unique",
+		});
+		const repository = createDbXiaohongshuPublisherRepository(database);
+
+		const claimed = await repository.claimTaskForPublish(
+			userId,
+			"xhs_publish_task_2"
+		);
+
+		expect(claimed).toBeNull();
+	});
+
+	it("rethrows unexpected claim errors", async () => {
+		const { database } = createFakeRejectingClaimTaskDatabase({
+			code: "23505",
+			constraint: "other_unique",
+		});
+		const repository = createDbXiaohongshuPublisherRepository(database);
+
+		await expect(
+			repository.claimTaskForPublish(userId, "xhs_publish_task_2")
+		).rejects.toMatchObject({
+			code: "23505",
+			constraint: "other_unique",
+		});
 	});
 });

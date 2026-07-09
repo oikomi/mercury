@@ -1,0 +1,1 @@
+CREATE UNIQUE INDEX "xhs_publish_task_active_user_unique" ON "xhs_publish_task" USING btree ("user_id") WHERE "xhs_publish_task"."status" in ('validating', 'opening_browser', 'checking_login', 'uploading_media', 'filling_form', 'submitting', 'verifying_result');

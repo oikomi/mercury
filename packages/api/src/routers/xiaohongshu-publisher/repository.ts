@@ -9,6 +9,16 @@ import type {
 
 export type XiaohongshuTaskLogLevel = "info" | "warn" | "error";
 
+export const activeXiaohongshuPublishTaskStatuses = [
+	"validating",
+	"opening_browser",
+	"checking_login",
+	"uploading_media",
+	"filling_form",
+	"submitting",
+	"verifying_result",
+] as const satisfies readonly XiaohongshuTaskStatus[];
+
 export interface XiaohongshuAccountConfigRow {
 	createdAt: Date;
 	displayName: string | null;
@@ -86,6 +96,14 @@ export interface UpsertAccountConfigInput {
 
 export interface XiaohongshuPublisherRepository {
 	addTaskLog: (input: AddTaskLogInput) => Promise<XiaohongshuPublishTaskLogRow>;
+	/**
+	 * Must atomically claim a created task and allow only one active publish task
+	 * per user at a time.
+	 */
+	claimTaskForPublish: (
+		userId: string,
+		taskId: string
+	) => Promise<XiaohongshuPublishTaskRow | null>;
 	createTask: (
 		input: CreateTaskRepositoryInput
 	) => Promise<XiaohongshuPublishTaskRow>;

@@ -1,0 +1,44 @@
+{
+  "name": "mercury",
+  "private": true,
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "type": "module",
+  "scripts": {
+    "dev": "nx run-many -t dev",
+    "build": "nx run-many -t build",
+    "check-types": "nx run-many -t check-types",
+    "dev:native": "nx run-many -t dev --projects=native",
+    "dev:web": "nx run-many -t dev --projects=web",
+    "dev:tui": "nx run-many -t dev --projects=tui",
+    "db:push": "nx run-many -t db:push --projects=@mercury/db",
+    "db:studio": "nx run-many -t db:studio --projects=@mercury/db",
+    "db:generate": "nx run-many -t db:generate --projects=@mercury/db",
+    "db:migrate": "nx run-many -t db:migrate --projects=@mercury/db",
+    "db:start": "nx run-many -t db:start --projects=@mercury/db",
+    "db:watch": "nx run-many -t db:watch --projects=@mercury/db",
+    "db:stop": "nx run-many -t db:stop --projects=@mercury/db",
+    "db:down": "nx run-many -t db:down --projects=@mercury/db",
+    "check": "ultracite check",
+    "fix": "ultracite fix",
+    "prepare": "husky"
+  },
+  "dependencies": {
+    "@mercury/env": "*",
+    "dotenv": "^17.4.2",
+    "zod": "^4.4.3"
+  },
+  "devDependencies": {
+    "@biomejs/biome": "2.5.2",
+    "@mercury/config": "*",
+    "@types/node": "^22.13.14",
+    "husky": "latest",
+    "lefthook": "latest",
+    "nx": "^23.0.1",
+    "typescript": "^6",
+    "ultracite": "7.9.3"
+  },
+  "packageManager": "npm@10.9.7"
+}

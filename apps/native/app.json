@@ -1,0 +1,17 @@
+{
+  "expo": {
+    "scheme": "mercury",
+    "userInterfaceStyle": "automatic",
+    "orientation": "default",
+    "web": {
+      "bundler": "metro"
+    },
+    "name": "mercury",
+    "slug": "mercury",
+    "plugins": ["expo-font"],
+    "experiments": {
+      "typedRoutes": true,
+      "reactCompiler": true
+    }
+  }
+}

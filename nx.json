@@ -1,0 +1,55 @@
+{
+  "$schema": "./node_modules/nx/schemas/nx-schema.json",
+  "namedInputs": {
+    "default": ["{projectRoot}/**/*", "sharedGlobals"],
+    "production": [
+      "default",
+      "!{workspaceRoot}/apps/web/.next/**",
+      "!{workspaceRoot}/apps/web/out/**",
+      "!{workspaceRoot}/apps/native/.expo/**",
+      "!{workspaceRoot}/apps/native/dist/**",
+      "!{workspaceRoot}/apps/native/web-build/**",
+      "!{workspaceRoot}/packages/db/dist/**",
+      "!{projectRoot}/**/?(*.)+(spec|test).[jt]s?(x)?(.snap)",
+      "!{projectRoot}/tsconfig.spec.json"
+    ],
+    "sharedGlobals": []
+  },
+  "targetDefaults": {
+    "build": {
+      "dependsOn": ["^build"],
+      "inputs": ["production", "^production"]
+    },
+    "check-types": {
+      "dependsOn": ["^check-types"],
+      "inputs": ["default", "^default"]
+    },
+    "dev": {
+      "cache": false
+    },
+    "db:push": {
+      "cache": false
+    },
+    "db:generate": {
+      "cache": false
+    },
+    "db:migrate": {
+      "cache": false
+    },
+    "db:studio": {
+      "cache": false
+    },
+    "db:start": {
+      "cache": false
+    },
+    "db:stop": {
+      "cache": false
+    },
+    "db:watch": {
+      "cache": false
+    },
+    "db:down": {
+      "cache": false
+    }
+  }
+}

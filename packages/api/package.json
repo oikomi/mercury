@@ -1,0 +1,27 @@
+{
+  "name": "@mercury/api",
+  "type": "module",
+  "exports": {
+    ".": {
+      "default": "./src/index.ts"
+    },
+    "./*": {
+      "default": "./src/*.ts"
+    }
+  },
+  "scripts": {},
+  "dependencies": {
+    "@mercury/auth": "*",
+    "@mercury/db": "*",
+    "@mercury/env": "*",
+    "@trpc/client": "^11.18.0",
+    "@trpc/server": "^11.18.0",
+    "dotenv": "^17.4.2",
+    "next": "^16.2.0",
+    "zod": "^4.4.3"
+  },
+  "devDependencies": {
+    "@mercury/config": "*",
+    "typescript": "^6"
+  }
+}

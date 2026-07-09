@@ -16,6 +16,7 @@
       "!**/.agents",
       "!**/.codex",
       "!**/.idea",
+      "!**/.superpowers",
       "!**/.zed",
       "!**/.vscode",
       "!**/routeTree.gen.ts",

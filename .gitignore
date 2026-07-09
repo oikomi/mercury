@@ -51,5 +51,6 @@ coverage
 # Misc
 *.tgz
 .cache
+.superpowers
 tmp
 temp

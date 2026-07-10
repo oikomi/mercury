@@ -51,6 +51,7 @@ coverage
 # Misc
 *.tgz
 .cache
+.data/
 .superpowers
 .worktrees/
 tmp

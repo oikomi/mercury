@@ -4,6 +4,7 @@ set -Eeuo pipefail
 
 ROOT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
 SOURCE_RESTART_SCRIPT="${ROOT_DIR}/restart.sh"
+WEB_PACKAGE_JSON="${ROOT_DIR}/apps/web/package.json"
 TEST_DIR="$(mktemp -d "${TMPDIR:-/tmp}/mercury-restart-test.XXXXXX")"
 TEST_DIR="$(cd -- "${TEST_DIR}" && pwd)"
 FIXTURE_DIR="${TEST_DIR}/project"
@@ -27,6 +28,7 @@ AUXILIARY_PID=""
 OCCUPIED_PORT=""
 PORT_OWNER_PID=""
 DEV_DESCENDANT_MODE=""
+WEB_PORT=""
 
 fail() {
   printf 'FAIL: %s\n' "$1" >&2
@@ -109,6 +111,8 @@ cleanup_test_environment() {
 trap cleanup_test_environment EXIT
 
 [[ -x "${SOURCE_RESTART_SCRIPT}" ]] || fail "restart.sh must exist and be executable"
+grep -Fq -- 'next dev --port ${MERCURY_WEB_PORT:-18123}' "${WEB_PACKAGE_JSON}" ||
+  fail "web dev script must honor MERCURY_WEB_PORT"
 
 mkdir -p -- "${SHIM_DIR}" "${FIXTURE_DIR}/apps/web" "${FIXTURE_DIR}/apps/native"
 cp -- "${SOURCE_RESTART_SCRIPT}" "${RESTART_SCRIPT}"
@@ -198,6 +202,9 @@ if [[ "$*" == "run dev" ]]; then
   }
 
   trap stop_dev INT TERM
+	printf 'dev web port %s\n' "${MERCURY_WEB_PORT:-<missing>}" >>"${MERCURY_TEST_LOG}"
+	printf 'dev auth url %s\n' "${BETTER_AUTH_URL:-<missing>}" >>"${MERCURY_TEST_LOG}"
+	printf 'dev native server url %s\n' "${EXPO_PUBLIC_SERVER_URL:-<missing>}" >>"${MERCURY_TEST_LOG}"
   printf '%s\n' "$$" >"${MERCURY_TEST_DEV_PID_FILE}"
 
   if IFS= read -r -n 1 DEV_STDIN_BYTE; then
@@ -339,6 +346,7 @@ launch_supervisor() {
       MERCURY_RESTART_STATE_DIR="${STATE_DIR}" \
       MERCURY_RESTART_HEALTH_TIMEOUT=2 \
       MERCURY_RESTART_SHUTDOWN_TIMEOUT="${shutdown_timeout}" \
+			MERCURY_WEB_PORT="${WEB_PORT}" \
       ./restart.sh
   ) <"${STDIN_FILE}" >"${output_file}" 2>&1 &
   LAUNCHED_SUPERVISOR_PID=$!
@@ -428,7 +436,7 @@ wait_for_log_count 1 "cleanup db:stop entered" ||
 
 assert_count 1 "npm run db:start"
 assert_count 1 "npm run dev"
-assert_count 1 "lsof -nP -iTCP:3001 -sTCP:LISTEN -t"
+assert_count 1 "lsof -nP -iTCP:18123 -sTCP:LISTEN -t"
 assert_count 1 "lsof -nP -iTCP:8081 -sTCP:LISTEN -t"
 [[ ! -e "${CLEANUP_GATE_FILE}" ]] || fail "managed cleanup gate was released early"
 
@@ -466,7 +474,7 @@ assert_count 2 "npm run db:start"
 assert_count 2 "npm run dev"
 assert_count 2 "dev received TERM"
 assert_count 4 "npm run db:stop"
-assert_count 2 "lsof -nP -iTCP:3001 -sTCP:LISTEN -t"
+assert_count 2 "lsof -nP -iTCP:18123 -sTCP:LISTEN -t"
 assert_count 2 "lsof -nP -iTCP:8081 -sTCP:LISTEN -t"
 
 cleanup_finished_line="$(
@@ -478,8 +486,8 @@ replacement_db_start_line="$(
 replacement_dev_start_line="$(
   grep -nFx -- "npm run dev" "${LOG_FILE}" | sed -n '2p' | cut -d: -f1
 )"
-replacement_port_3001_line="$(
-  grep -nFx -- "lsof -nP -iTCP:3001 -sTCP:LISTEN -t" "${LOG_FILE}" |
+replacement_port_18123_line="$(
+  grep -nFx -- "lsof -nP -iTCP:18123 -sTCP:LISTEN -t" "${LOG_FILE}" |
     sed -n '2p' |
     cut -d: -f1
 )"
@@ -488,12 +496,12 @@ replacement_port_8081_line="$(
     sed -n '2p' |
     cut -d: -f1
 )"
-((cleanup_finished_line < replacement_port_3001_line)) ||
-  fail "replacement probed port 3001 before prior cleanup finished"
+((cleanup_finished_line < replacement_port_18123_line)) ||
+  fail "replacement probed port 18123 before prior cleanup finished"
 ((cleanup_finished_line < replacement_port_8081_line)) ||
   fail "replacement probed port 8081 before prior cleanup finished"
-((replacement_port_3001_line < replacement_db_start_line)) ||
-  fail "replacement database started before port 3001 was checked"
+((replacement_port_18123_line < replacement_db_start_line)) ||
+  fail "replacement database started before port 18123 was checked"
 ((replacement_port_8081_line < replacement_db_start_line)) ||
   fail "replacement database started before port 8081 was checked"
 ((cleanup_finished_line < replacement_db_start_line)) ||
@@ -675,7 +683,46 @@ test_occupied_port() {
   printf 'PASS: occupied port %s safety\n' "${occupied_port}"
 }
 
-test_occupied_port 3001
+reset_case_files
+sleep 30 &
+AUXILIARY_PID=$!
+OCCUPIED_PORT="18123"
+PORT_OWNER_PID="${AUXILIARY_PID}"
+WEB_PORT="18124"
+
+launch_supervisor "${OUTPUT_FILE}"
+SUPERVISOR_PID="${LAUNCHED_SUPERVISOR_PID}"
+wait_for_log_count 1 "dev ready" || fail "custom-port development process did not become ready"
+
+assert_count 0 "lsof -nP -iTCP:18123 -sTCP:LISTEN -t"
+assert_count 1 "lsof -nP -iTCP:18124 -sTCP:LISTEN -t"
+assert_count 1 "lsof -nP -iTCP:8081 -sTCP:LISTEN -t"
+assert_count 1 "dev web port 18124"
+assert_count 1 "dev auth url http://localhost:18124"
+assert_count 1 "dev native server url http://localhost:18124"
+process_is_running "${AUXILIARY_PID}" || fail "custom port signaled port 18123 owner"
+
+: >"${CLEANUP_GATE_FILE}"
+kill -TERM "${SUPERVISOR_PID}"
+wait_for_process_exit "${SUPERVISOR_PID}" || fail "custom-port supervisor did not exit"
+set +e
+wait "${SUPERVISOR_PID}"
+custom_port_status=$?
+set -e
+SUPERVISOR_PID=""
+
+[[ "${custom_port_status}" == "143" ]] ||
+  fail "expected custom-port supervisor status 143, got ${custom_port_status}"
+
+stop_test_process "${AUXILIARY_PID}"
+AUXILIARY_PID=""
+OCCUPIED_PORT=""
+PORT_OWNER_PID=""
+WEB_PORT=""
+
+printf '%s\n' "PASS: custom web port"
+
+test_occupied_port 18123
 test_occupied_port 8081
 
 reset_case_files

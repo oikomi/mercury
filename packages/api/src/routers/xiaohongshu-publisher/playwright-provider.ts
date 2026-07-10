@@ -35,11 +35,8 @@ const LOGIN_TEXT_PATTERN = /扫码登录|手机号登录|登录后即可|请登�
 const READY_TEXT_PATTERN = /发布笔记|发布管理|数据看板|创作中心/u;
 const SUCCESS_TEXT_PATTERN = /发布成功|笔记发布成功|提交成功/u;
 const VISIBILITY_TRIGGER_PATTERN = /公开可见|公开|可见范围/u;
-const VIDEO_MODE_PATTERN = /上传视频|发布视频/u;
-const IMAGE_MODE_PATTERN = /上传图文|发布图文/u;
 const TITLE_PLACEHOLDER_PATTERN = /填写标题|标题/u;
-const CONTENT_PLACEHOLDER_PATTERN = /填写正文|正文|描述|分享/u;
-const PUBLISH_BUTTON_PATTERN = /^发布$/u;
+const PUBLISH_BUTTON_TEXT = "发布";
 const RESULT_LINK_PATTERN = /查看笔记|查看作品|查看详情/u;
 
 const normalizePublicNoteUrl = (candidate: string | null): string | null => {
@@ -92,6 +89,9 @@ const buildDescription = (input: XiaohongshuPublishInput): string => {
 	return [input.content, topicText].filter(Boolean).join("\n\n");
 };
 
+export const getCreatorPublishUrl = (mediaType: "image" | "video"): string =>
+	`https://creator.xiaohongshu.com/publish/publish?from=homepage&target=${mediaType}`;
+
 const getSessionStatus = async (
 	page: Page,
 	profilePath: string
@@ -138,6 +138,33 @@ const validateMedia = async (input: XiaohongshuPublishInput): Promise<void> => {
 	await Promise.all(input.media.map((media) => access(media.path)));
 };
 
+export const uploadMedia = async (
+	page: Page,
+	media: XiaohongshuPublishInput["media"]
+): Promise<void> => {
+	await page
+		.locator('input[type="file"]')
+		.first()
+		.setInputFiles(media.map((item) => item.path));
+};
+
+export const fillDescription = async (
+	page: Page,
+	description: string
+): Promise<void> => {
+	await page
+		.locator('[contenteditable="true"]')
+		.first()
+		.fill(description, { timeout: PAGE_TIMEOUT_MS });
+};
+
+export const clickPublish = async (page: Page): Promise<void> => {
+	await page
+		.getByText(PUBLISH_BUTTON_TEXT, { exact: true })
+		.last()
+		.click({ timeout: PAGE_TIMEOUT_MS });
+};
+
 const applyVisibility = async (
 	page: Page,
 	visibility: XiaohongshuPublishInput["visibility"]
@@ -161,30 +188,14 @@ const fillAndSubmitPublishForm = async (
 	page: Page,
 	input: XiaohongshuPublishInput
 ): Promise<void> => {
-	const mediaType = input.media[0]?.type;
-	const publishMode = page
-		.getByText(mediaType === "video" ? VIDEO_MODE_PATTERN : IMAGE_MODE_PATTERN)
-		.first();
-	if (await publishMode.isVisible().catch(() => false)) {
-		await publishMode.click();
-	}
-
-	const fileInput = page.locator('input[type="file"]').first();
-	await fileInput.waitFor({ timeout: PAGE_TIMEOUT_MS });
-	await fileInput.setInputFiles(input.media.map((media) => media.path));
+	await uploadMedia(page, input.media);
 	await page
 		.getByPlaceholder(TITLE_PLACEHOLDER_PATTERN)
 		.first()
 		.fill(input.title, { timeout: PAGE_TIMEOUT_MS });
-	await page
-		.getByPlaceholder(CONTENT_PLACEHOLDER_PATTERN)
-		.first()
-		.fill(buildDescription(input), { timeout: PAGE_TIMEOUT_MS });
+	await fillDescription(page, buildDescription(input));
 	await applyVisibility(page, input.visibility);
-	await page
-		.getByRole("button", { name: PUBLISH_BUTTON_PATTERN })
-		.last()
-		.click({ timeout: PAGE_TIMEOUT_MS });
+	await clickPublish(page);
 };
 
 const collectPublishConfirmation = async (
@@ -295,6 +306,10 @@ export function createPlaywrightXiaohongshuPublishProvider(
 					};
 				}
 
+				await page.goto(getCreatorPublishUrl(input.media[0]?.type ?? "image"), {
+					timeout: PAGE_TIMEOUT_MS,
+					waitUntil: "domcontentloaded",
+				});
 				await fillAndSubmitPublishForm(page, input);
 				const confirmation = await collectPublishConfirmation(page);
 				if (confirmation.status === "submitted_unknown") {

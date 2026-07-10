@@ -3,7 +3,7 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
-    "dev": "next dev --port 3001",
+    "dev": "next dev --port ${MERCURY_WEB_PORT:-18123}",
     "build": "next build",
     "start": "next start"
   },

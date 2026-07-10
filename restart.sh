@@ -14,6 +14,8 @@ STATE_DIR="${MERCURY_RESTART_STATE_DIR:-${ROOT_DIR}/.nx}"
 PID_FILE="${STATE_DIR}/mercury-restart.pid"
 HEALTH_TIMEOUT="${MERCURY_RESTART_HEALTH_TIMEOUT:-60}"
 SHUTDOWN_TIMEOUT="${MERCURY_RESTART_SHUTDOWN_TIMEOUT:-10}"
+WEB_PORT="${MERCURY_WEB_PORT:-18123}"
+WEB_ORIGIN="${MERCURY_WEB_ORIGIN:-http://localhost:${WEB_PORT}}"
 DEV_PID=""
 CLEANUP_STARTED=0
 
@@ -44,6 +46,8 @@ validate_environment() {
     die "MERCURY_RESTART_HEALTH_TIMEOUT must be a positive integer"
   [[ "${SHUTDOWN_TIMEOUT}" =~ ^[1-9][0-9]*$ ]] ||
     die "MERCURY_RESTART_SHUTDOWN_TIMEOUT must be a positive integer"
+  [[ "${WEB_PORT}" =~ ^[1-9][0-9]{0,4}$ ]] && ((10#${WEB_PORT} <= 65535)) ||
+    die "MERCURY_WEB_PORT must be an integer between 1 and 65535"
 
   for command_name in npm bun docker lsof pgrep ps; do
     require_command "${command_name}"
@@ -202,7 +206,7 @@ main() {
 
   mkdir -p -- "${STATE_DIR}"
   stop_previous_session
-  assert_port_available 3001
+  assert_port_available "${WEB_PORT}"
   assert_port_available 8081
   trap 'cleanup "$?"' EXIT
   trap 'cleanup 130' INT
@@ -218,7 +222,12 @@ main() {
   log "Waiting for database health"
   wait_for_database
 
-  log "Starting development services"
+  export BETTER_AUTH_URL="${WEB_ORIGIN}"
+  export CORS_ORIGIN="${WEB_ORIGIN}"
+  export EXPO_PUBLIC_SERVER_URL="${WEB_ORIGIN}"
+  export MERCURY_WEB_PORT="${WEB_PORT}"
+
+  log "Starting development services (Web: ${WEB_ORIGIN})"
   npm run dev <&0 &
   DEV_PID=$!
 

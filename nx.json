@@ -51,5 +51,6 @@
     "db:down": {
       "cache": false
     }
-  }
+  },
+  "analytics": true
 }

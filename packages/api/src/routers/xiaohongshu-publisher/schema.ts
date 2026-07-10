@@ -1,0 +1,94 @@
+import { z } from "zod";
+
+const LEADING_HASHTAGS_PATTERN = /^#+/;
+
+export const xiaohongshuVisibilityValues = [
+	"public",
+	"private",
+	"followers",
+] as const;
+
+export const xiaohongshuTaskStatusValues = [
+	"created",
+	"validating",
+	"opening_browser",
+	"checking_login",
+	"uploading_media",
+	"filling_form",
+	"submitting",
+	"verifying_result",
+	"succeeded",
+	"failed",
+	"submitted_unknown",
+] as const;
+
+export const xiaohongshuAccountStatusValues = [
+	"not_configured",
+	"login_required",
+	"ready",
+	"expired",
+	"error",
+] as const;
+
+export const xiaohongshuMediaTypeValues = ["image", "video"] as const;
+
+export const xiaohongshuMediaSchema = z.object({
+	mimeType: z.string().trim().min(1),
+	name: z.string().trim().min(1),
+	path: z
+		.string()
+		.refine((value) => value.trim().length > 0, "Media path is required"),
+	size: z.number().int().positive(),
+	type: z.enum(xiaohongshuMediaTypeValues),
+});
+
+export const createPublishTaskInputSchema = z.object({
+	content: z.string().trim().min(1).max(5000),
+	media: z.array(xiaohongshuMediaSchema).min(1).max(18),
+	title: z.string().trim().min(1).max(60),
+	topics: z
+		.array(z.string())
+		.default([])
+		.transform((topics) => normalizeTopics(topics)),
+	visibility: z.enum(xiaohongshuVisibilityValues).default("public"),
+});
+
+export const publishTaskInputSchema = z.object({
+	taskId: z.string().trim().min(1),
+});
+
+export const getTaskInputSchema = z.object({
+	taskId: z.string().trim().min(1),
+});
+
+export type XiaohongshuVisibility =
+	(typeof xiaohongshuVisibilityValues)[number];
+export type XiaohongshuTaskStatus =
+	(typeof xiaohongshuTaskStatusValues)[number];
+export type XiaohongshuAccountStatus =
+	(typeof xiaohongshuAccountStatusValues)[number];
+export type XiaohongshuMediaType = (typeof xiaohongshuMediaTypeValues)[number];
+export type XiaohongshuMedia = z.infer<typeof xiaohongshuMediaSchema>;
+export type CreatePublishTaskInput = z.input<
+	typeof createPublishTaskInputSchema
+>;
+export type NormalizedPublishTaskInput = z.output<
+	typeof createPublishTaskInputSchema
+>;
+
+export function normalizeTopics(topics: string[]): string[] {
+	const seen = new Set<string>();
+	const normalized: string[] = [];
+
+	for (const topic of topics) {
+		const value = topic.trim().replace(LEADING_HASHTAGS_PATTERN, "").trim();
+		if (!value || seen.has(value)) {
+			continue;
+		}
+
+		seen.add(value);
+		normalized.push(value);
+	}
+
+	return normalized;
+}

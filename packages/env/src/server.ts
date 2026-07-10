@@ -13,6 +13,9 @@ export const env = createEnv({
 		NODE_ENV: z
 			.enum(["development", "production", "test"])
 			.default("development"),
+		XHS_ARTIFACT_DIR: z.string().default(".data/xhs-artifacts"),
+		XHS_PROFILE_DIR: z.string().default(".data/xhs-profile"),
+		XHS_PROVIDER: z.enum(["mock", "playwright"]).default("mock"),
 	},
 	skipValidation: !!process.env.SKIP_ENV_VALIDATION,
 });

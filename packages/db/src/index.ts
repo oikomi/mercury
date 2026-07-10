@@ -10,6 +10,14 @@ import {
 	userRelations,
 	verification,
 } from "./schema/auth";
+import {
+	xhsAccountConfig,
+	xhsAccountConfigRelations,
+	xhsPublishTask,
+	xhsPublishTaskLog,
+	xhsPublishTaskLogRelations,
+	xhsPublishTaskRelations,
+} from "./schema/xiaohongshu-publisher";
 
 const schema = {
 	account,
@@ -19,6 +27,12 @@ const schema = {
 	user,
 	userRelations,
 	verification,
+	xhsAccountConfig,
+	xhsAccountConfigRelations,
+	xhsPublishTask,
+	xhsPublishTaskLog,
+	xhsPublishTaskLogRelations,
+	xhsPublishTaskRelations,
 };
 
 export function createDb() {

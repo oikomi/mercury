@@ -3,9 +3,17 @@
 set -Eeuo pipefail
 
 ROOT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+CANONICAL_RESTART_SCRIPT="${ROOT_DIR}/restart.sh"
+
+if [[ "${BASH_SOURCE[0]}" != "${CANONICAL_RESTART_SCRIPT}" ]]; then
+  export MERCURY_RESTART_CANONICAL_PATH="${CANONICAL_RESTART_SCRIPT}"
+  exec "${CANONICAL_RESTART_SCRIPT}" "$@"
+fi
+
 STATE_DIR="${MERCURY_RESTART_STATE_DIR:-${ROOT_DIR}/.nx}"
 PID_FILE="${STATE_DIR}/mercury-restart.pid"
 HEALTH_TIMEOUT="${MERCURY_RESTART_HEALTH_TIMEOUT:-60}"
+SHUTDOWN_TIMEOUT="${MERCURY_RESTART_SHUTDOWN_TIMEOUT:-10}"
 DEV_PID=""
 CLEANUP_STARTED=0
 
@@ -34,14 +42,95 @@ validate_environment() {
 
   [[ "${HEALTH_TIMEOUT}" =~ ^[1-9][0-9]*$ ]] ||
     die "MERCURY_RESTART_HEALTH_TIMEOUT must be a positive integer"
+  [[ "${SHUTDOWN_TIMEOUT}" =~ ^[1-9][0-9]*$ ]] ||
+    die "MERCURY_RESTART_SHUTDOWN_TIMEOUT must be a positive integer"
 
-  for command_name in npm bun docker lsof; do
+  for command_name in npm bun docker lsof pgrep ps; do
     require_command "${command_name}"
   done
 
   docker info >/dev/null 2>&1 || die "Docker is not reachable"
   [[ -f "${ROOT_DIR}/apps/web/.env" ]] || die "apps/web/.env is required"
   [[ -f "${ROOT_DIR}/apps/native/.env" ]] || die "apps/native/.env is required"
+}
+
+process_is_running() {
+  local process_pid="$1"
+  local process_state=""
+
+  kill -0 "${process_pid}" 2>/dev/null || return 1
+  process_state="$(ps -p "${process_pid}" -o state= 2>/dev/null || true)"
+  [[ -n "${process_state}" ]] && [[ "${process_state}" != *Z* ]]
+}
+
+stop_previous_session() {
+  local elapsed_seconds=0
+  local previous_command=""
+  local previous_pid=""
+
+  [[ -f "${PID_FILE}" ]] || return 0
+
+  previous_pid="$(<"${PID_FILE}")"
+  if [[ ! "${previous_pid}" =~ ^[1-9][0-9]*$ ]]; then
+    warn "removing malformed restart PID file: ${PID_FILE}"
+    rm -f -- "${PID_FILE}"
+    return 0
+  fi
+
+  if ! process_is_running "${previous_pid}"; then
+    rm -f -- "${PID_FILE}"
+    return
+  fi
+
+  previous_command="$(ps -p "${previous_pid}" -o command= 2>/dev/null || true)"
+  case " ${previous_command} " in
+    *" ${CANONICAL_RESTART_SCRIPT} "*)
+      ;;
+    *)
+      die "PID ${previous_pid} is not running ${CANONICAL_RESTART_SCRIPT}; refusing to signal it (remove ${PID_FILE} if stale)"
+      ;;
+  esac
+
+  log "Stopping previous restart session (PID ${previous_pid})"
+  kill -TERM "${previous_pid}" 2>/dev/null || true
+
+  while ((elapsed_seconds < SHUTDOWN_TIMEOUT)); do
+    if ! process_is_running "${previous_pid}"; then
+      rm -f -- "${PID_FILE}"
+      return
+    fi
+
+    sleep 1
+    ((elapsed_seconds += 1))
+  done
+
+  die "previous restart session PID ${previous_pid} did not exit within ${SHUTDOWN_TIMEOUT} seconds; stop it manually or increase MERCURY_RESTART_SHUTDOWN_TIMEOUT (KILL was not sent)"
+}
+
+assert_port_available() {
+  local listener_pids=""
+  local port="$1"
+
+  listener_pids="$(lsof -nP -iTCP:"${port}" -sTCP:LISTEN -t 2>/dev/null || true)"
+  if [[ -n "${listener_pids}" ]]; then
+    listener_pids="${listener_pids//$'\n'/ }"
+    die "Port ${port} is already in use by PID(s): ${listener_pids}"
+  fi
+}
+
+terminate_process_tree() {
+  local child_pid
+  local child_pids=""
+  local root_pid="$1"
+
+  child_pids="$(pgrep -P "${root_pid}" 2>/dev/null || true)"
+  for child_pid in ${child_pids}; do
+    terminate_process_tree "${child_pid}"
+  done
+
+  if process_is_running "${root_pid}"; then
+    kill -TERM "${root_pid}" 2>/dev/null || true
+  fi
 }
 
 cleanup() {
@@ -57,8 +146,8 @@ cleanup() {
   trap '' INT TERM
   set +e
 
-  if [[ -n "${DEV_PID}" ]] && kill -0 "${DEV_PID}" 2>/dev/null; then
-    kill -TERM "${DEV_PID}" 2>/dev/null
+  if [[ -n "${DEV_PID}" ]] && process_is_running "${DEV_PID}"; then
+    terminate_process_tree "${DEV_PID}"
   fi
 
   if [[ -n "${DEV_PID}" ]]; then
@@ -112,6 +201,9 @@ main() {
   validate_environment
 
   mkdir -p -- "${STATE_DIR}"
+  stop_previous_session
+  assert_port_available 3001
+  assert_port_available 8081
   trap 'cleanup "$?"' EXIT
   trap 'cleanup 130' INT
   trap 'cleanup 143' TERM

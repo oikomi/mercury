@@ -30,6 +30,10 @@ export interface XiaohongshuPublisherService {
 		userId: string,
 		taskId: string
 	) => Promise<XiaohongshuPublishTaskRow>;
+	refreshAccountStatus: (
+		userId: string
+	) => Promise<XiaohongshuAccountConfigRow>;
+	startLogin: (userId: string) => Promise<XiaohongshuAccountConfigRow>;
 }
 
 export interface XiaohongshuPublisherServiceDependencies {
@@ -77,6 +81,20 @@ export function createXiaohongshuPublisherService({
 	provider,
 	repository,
 }: XiaohongshuPublisherServiceDependencies): XiaohongshuPublisherService {
+	const persistSessionStatus = async (
+		userId: string,
+		session: Awaited<ReturnType<XiaohongshuPublishProvider["checkSession"]>>,
+		lastLoginAt?: Date
+	): Promise<XiaohongshuAccountConfigRow> =>
+		repository.upsertAccountConfig({
+			displayName: session.displayName,
+			lastCheckedAt: new Date(),
+			lastLoginAt,
+			profilePath: session.profilePath,
+			status: session.status,
+			userId,
+		});
+
 	const logTaskStep = (
 		taskId: string,
 		step: string,
@@ -218,13 +236,7 @@ export function createXiaohongshuPublisherService({
 
 			const session = await provider.checkSession();
 
-			return repository.upsertAccountConfig({
-				displayName: session.displayName,
-				lastCheckedAt: new Date(),
-				profilePath: session.profilePath,
-				status: session.status,
-				userId,
-			});
+			return persistSessionStatus(userId, session);
 		},
 
 		getTask(
@@ -309,6 +321,27 @@ export function createXiaohongshuPublisherService({
 			}
 
 			return assertNever(result);
+		},
+
+		async refreshAccountStatus(
+			userId: string
+		): Promise<XiaohongshuAccountConfigRow> {
+			const session = await provider.checkSession();
+
+			return persistSessionStatus(userId, session);
+		},
+
+		async startLogin(userId: string): Promise<XiaohongshuAccountConfigRow> {
+			if (!provider.startLogin) {
+				throw new Error(
+					"The active provider does not support interactive login."
+				);
+			}
+
+			const session = await provider.startLogin();
+			const lastLoginAt = session.status === "ready" ? new Date() : undefined;
+
+			return persistSessionStatus(userId, session, lastLoginAt);
 		},
 	};
 }

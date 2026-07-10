@@ -41,6 +41,8 @@ import {
 	CircleIcon,
 	Clock3Icon,
 	FileImageIcon,
+	LogInIcon,
+	RefreshCwIcon,
 	SendIcon,
 	ShieldCheckIcon,
 	UserRoundIcon,
@@ -91,6 +93,8 @@ interface PreflightCheck {
 interface AccountCardProps {
 	displayName: string | null | undefined;
 	isLoading: boolean;
+	onRefresh: () => Promise<void>;
+	onStartLogin: () => Promise<void>;
 	status: string | undefined;
 }
 
@@ -137,8 +141,25 @@ const getBadgeVariant = (
 	return status ? "secondary" : "outline";
 };
 
-function AccountCard({ displayName, isLoading, status }: AccountCardProps) {
-	const statusText = isLoading ? "检查中" : (status ?? "未知");
+const accountStatusLabels: Record<string, string> = {
+	error: "检测失败",
+	expired: "登录过期",
+	login_required: "需要登录",
+	not_configured: "未配置",
+	ready: "已就绪",
+};
+
+function AccountCard({
+	displayName,
+	isLoading,
+	onRefresh,
+	onStartLogin,
+	status,
+}: AccountCardProps) {
+	const statusText = isLoading
+		? "检查中"
+		: (accountStatusLabels[status ?? ""] ?? "未知");
+	const needsLogin = status !== "ready";
 
 	return (
 		<Card size="sm">
@@ -152,6 +173,29 @@ function AccountCard({ displayName, isLoading, status }: AccountCardProps) {
 					<Badge variant={getBadgeVariant(status)}>{statusText}</Badge>
 				</CardAction>
 			</CardHeader>
+			<CardContent className="flex flex-wrap gap-2">
+				<Button
+					disabled={isLoading}
+					onClick={onRefresh}
+					size="xs"
+					type="button"
+					variant="outline"
+				>
+					<RefreshCwIcon aria-hidden="true" data-icon="inline-start" />
+					重新检测
+				</Button>
+				{needsLogin ? (
+					<Button
+						disabled={isLoading}
+						onClick={onStartLogin}
+						size="xs"
+						type="button"
+					>
+						<LogInIcon aria-hidden="true" data-icon="inline-start" />
+						打开登录窗口
+					</Button>
+				) : null}
+			</CardContent>
 		</Card>
 	);
 }
@@ -263,6 +307,12 @@ export default function XiaohongshuPublisher() {
 	const publishTask = useMutation(
 		trpc.xiaohongshuPublisher.publishTask.mutationOptions()
 	);
+	const refreshAccountStatus = useMutation(
+		trpc.xiaohongshuPublisher.refreshAccountStatus.mutationOptions()
+	);
+	const startLogin = useMutation(
+		trpc.xiaohongshuPublisher.startLogin.mutationOptions()
+	);
 
 	const checks: PreflightCheck[] = [
 		{ id: "title", label: "标题", valid: title.trim().length > 0 },
@@ -280,6 +330,35 @@ export default function XiaohongshuPublisher() {
 	];
 	const canPublish = checks.every((check) => check.valid);
 	const isPublishing = createTask.isPending || publishTask.isPending;
+	const isAccountBusy =
+		accountStatus.isLoading ||
+		refreshAccountStatus.isPending ||
+		startLogin.isPending;
+
+	const runAccountAction = async (
+		action: () => Promise<unknown>
+	): Promise<void> => {
+		setFeedback(null);
+		try {
+			await action();
+			await queryClient.invalidateQueries();
+		} catch (error) {
+			setFeedback({
+				description: getErrorMessage(error),
+				kind: "error",
+				title: "账号操作失败",
+			});
+		}
+	};
+
+	const handleRefreshAccount = (): Promise<void> =>
+		runAccountAction(() => refreshAccountStatus.mutateAsync());
+
+	const handleStartLogin = (): Promise<void> =>
+		runAccountAction(() => startLogin.mutateAsync());
+	const selectedVisibilityLabel =
+		visibilityOptions.find((option) => option.value === visibility)?.label ??
+		"公开";
 
 	const handleVisibilityChange = (value: string | null) => {
 		if (value === "public" || value === "private" || value === "followers") {
@@ -355,7 +434,8 @@ export default function XiaohongshuPublisher() {
 					<Badge variant={getBadgeVariant(accountStatus.data?.status)}>
 						{accountStatus.isLoading
 							? "检查账号"
-							: (accountStatus.data?.status ?? "账号未知")}
+							: (accountStatusLabels[accountStatus.data?.status ?? ""] ??
+								"账号未知")}
 					</Badge>
 				</header>
 
@@ -406,7 +486,7 @@ export default function XiaohongshuPublisher() {
 												value={visibility}
 											>
 												<SelectTrigger className="w-full" id="xhs-visibility">
-													<SelectValue />
+													<SelectValue>{selectedVisibilityLabel}</SelectValue>
 												</SelectTrigger>
 												<SelectContent>
 													<SelectGroup>
@@ -465,7 +545,9 @@ export default function XiaohongshuPublisher() {
 					<aside className="flex flex-col gap-4">
 						<AccountCard
 							displayName={accountStatus.data?.displayName}
-							isLoading={accountStatus.isLoading}
+							isLoading={isAccountBusy}
+							onRefresh={handleRefreshAccount}
+							onStartLogin={handleStartLogin}
 							status={accountStatus.data?.status}
 						/>
 						<PreflightCard checks={checks} />

@@ -49,4 +49,5 @@ export interface XiaohongshuPublishProvider {
 	publish: (
 		input: XiaohongshuPublishInput
 	) => Promise<XiaohongshuPublishResult>;
+	startLogin?: () => Promise<XiaohongshuSessionStatus>;
 }

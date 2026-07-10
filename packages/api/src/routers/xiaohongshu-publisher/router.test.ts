@@ -84,6 +84,20 @@ describe("xiaohongshuPublisher router", () => {
 		);
 	});
 
+	it("refreshes account status and starts interactive login", async () => {
+		const caller = createTestRouter().createCaller({
+			auth: null,
+			session,
+		});
+
+		const refreshed = await caller.xiaohongshuPublisher.refreshAccountStatus();
+		const loggedIn = await caller.xiaohongshuPublisher.startLogin();
+
+		expect(refreshed.status).toBe("ready");
+		expect(loggedIn.status).toBe("ready");
+		expect(loggedIn.lastLoginAt).toBeInstanceOf(Date);
+	});
+
 	it("is mounted on the application router", () => {
 		expect("xiaohongshuPublisher" in appRouter._def.record).toBe(true);
 	});

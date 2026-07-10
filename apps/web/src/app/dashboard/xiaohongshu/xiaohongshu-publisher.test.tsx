@@ -3,13 +3,20 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import XiaohongshuPublisher from "./xiaohongshu-publisher";
 
-const { invalidateQueries } = vi.hoisted(() => ({
-	invalidateQueries: vi.fn(async () => undefined),
-}));
+const { accountStatus, invalidateQueries, refreshAccountStatus, startLogin } =
+	vi.hoisted(() => ({
+		accountStatus: {
+			displayName: "我的小红书账号",
+			status: "ready",
+		},
+		invalidateQueries: vi.fn(async () => undefined),
+		refreshAccountStatus: vi.fn(async () => ({ status: "ready" })),
+		startLogin: vi.fn(async () => ({ status: "ready" })),
+	}));
 
 vi.mock("@/utils/trpc", () => {
 	const createdTask = {
@@ -41,10 +48,7 @@ vi.mock("@/utils/trpc", () => {
 				},
 				getAccountStatus: {
 					queryOptions: () => ({
-						queryFn: async () => ({
-							displayName: "我的小红书账号",
-							status: "ready",
-						}),
+						queryFn: async () => accountStatus,
 						queryKey: ["xhs-account"],
 					}),
 				},
@@ -62,6 +66,16 @@ vi.mock("@/utils/trpc", () => {
 							resultUrl: "https://www.xiaohongshu.com/explore/mock",
 							status: "succeeded",
 						}),
+					}),
+				},
+				refreshAccountStatus: {
+					mutationOptions: () => ({
+						mutationFn: refreshAccountStatus,
+					}),
+				},
+				startLogin: {
+					mutationOptions: () => ({
+						mutationFn: startLogin,
 					}),
 				},
 			},
@@ -84,10 +98,20 @@ const renderPublisher = () => {
 };
 
 describe("XiaohongshuPublisher", () => {
+	beforeEach(() => {
+		accountStatus.displayName = "我的小红书账号";
+		accountStatus.status = "ready";
+		invalidateQueries.mockClear();
+		refreshAccountStatus.mockClear();
+		startLogin.mockClear();
+	});
+
 	it("submits a valid image-text task through the mock flow", async () => {
 		const user = userEvent.setup();
 		renderPublisher();
 
+		expect(await screen.findByText("公开")).toBeTruthy();
+		expect((await screen.findAllByText("已就绪")).length).toBeGreaterThan(0);
 		const publishButton = screen.getByRole("button", {
 			name: "发布到小红书",
 		});
@@ -99,6 +123,30 @@ describe("XiaohongshuPublisher", () => {
 		await user.click(publishButton);
 
 		expect(await screen.findByText("发布成功")).toBeTruthy();
+		expect(invalidateQueries).toHaveBeenCalled();
+	});
+
+	it("refreshes the account status on demand", async () => {
+		const user = userEvent.setup();
+		renderPublisher();
+
+		await user.click(await screen.findByRole("button", { name: "重新检测" }));
+
+		expect(refreshAccountStatus).toHaveBeenCalledOnce();
+		expect(invalidateQueries).toHaveBeenCalled();
+	});
+
+	it("opens an interactive login window when login is required", async () => {
+		accountStatus.displayName = "未登录账号";
+		accountStatus.status = "login_required";
+		const user = userEvent.setup();
+		renderPublisher();
+
+		await user.click(
+			await screen.findByRole("button", { name: "打开登录窗口" })
+		);
+
+		expect(startLogin).toHaveBeenCalledOnce();
 		expect(invalidateQueries).toHaveBeenCalled();
 	});
 });

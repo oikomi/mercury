@@ -52,5 +52,11 @@ export function createMockXiaohongshuPublishProvider(
 				status: "succeeded",
 			});
 		},
+		startLogin: (): Promise<XiaohongshuSessionStatus> =>
+			Promise.resolve({
+				displayName: "Mock Xiaohongshu",
+				profilePath: "/tmp/mercury-xhs-profile",
+				status: "ready",
+			}),
 	};
 }

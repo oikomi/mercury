@@ -559,6 +559,67 @@ describe("Xiaohongshu publisher service", () => {
 		);
 	});
 
+	it("refreshes a cached account status through the provider", async () => {
+		const repository = createMemoryXiaohongshuPublisherRepository();
+		const provider = {
+			checkSession: vi
+				.fn()
+				.mockResolvedValueOnce({
+					displayName: null,
+					profilePath: "/tmp/mercury-xhs-profile",
+					status: "login_required",
+				})
+				.mockResolvedValueOnce({
+					displayName: "已登录账号",
+					profilePath: "/tmp/mercury-xhs-profile",
+					status: "ready",
+				}),
+			publish: vi.fn(),
+			startLogin: vi.fn(),
+		} satisfies XiaohongshuPublishProvider;
+		const service = createXiaohongshuPublisherService({ provider, repository });
+
+		await service.getAccountStatus(userId);
+		const refreshed = await service.refreshAccountStatus(userId);
+
+		expect(provider.checkSession).toHaveBeenCalledTimes(2);
+		expect(refreshed).toEqual(
+			expect.objectContaining({
+				displayName: "已登录账号",
+				status: "ready",
+				userId,
+			})
+		);
+	});
+
+	it("starts interactive login and records the successful login time", async () => {
+		const loginCompletedAt = new Date("2026-07-10T08:00:00.000Z");
+		vi.useFakeTimers();
+		vi.setSystemTime(loginCompletedAt);
+		const provider = {
+			checkSession: vi.fn(),
+			publish: vi.fn(),
+			startLogin: vi.fn().mockResolvedValue({
+				displayName: "已登录账号",
+				profilePath: "/tmp/mercury-xhs-profile",
+				status: "ready",
+			}),
+		} satisfies XiaohongshuPublishProvider;
+		const { service } = createService({ provider });
+
+		try {
+			const status = await service.startLogin(userId);
+
+			expect(provider.startLogin).toHaveBeenCalledOnce();
+			expect(status.status).toBe("ready");
+			expect(status.lastLoginAt?.toISOString()).toBe(
+				loginCompletedAt.toISOString()
+			);
+		} finally {
+			vi.useRealTimers();
+		}
+	});
+
 	it("delegates list limits and returns limited repository results", async () => {
 		const repository = createMemoryXiaohongshuPublisherRepository();
 		const listTasks = vi.spyOn(repository, "listTasks");

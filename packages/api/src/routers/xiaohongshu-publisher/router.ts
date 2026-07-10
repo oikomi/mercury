@@ -2,7 +2,7 @@ import { z } from "zod";
 
 import { protectedProcedure, router } from "../../index";
 import { createDbXiaohongshuPublisherRepository } from "./db-repository";
-import { createMockXiaohongshuPublishProvider } from "./mock-provider";
+import { createXiaohongshuPublishProvider } from "./provider-factory";
 import {
 	createPublishTaskInputSchema,
 	getTaskInputSchema,
@@ -19,7 +19,7 @@ const listTasksInputSchema = z.object({
 
 export const createXiaohongshuPublisherRouter = (
 	service: XiaohongshuPublisherService = createXiaohongshuPublisherService({
-		provider: createMockXiaohongshuPublishProvider(),
+		provider: createXiaohongshuPublishProvider(),
 		repository: createDbXiaohongshuPublisherRepository(),
 	})
 ) =>
@@ -47,6 +47,12 @@ export const createXiaohongshuPublisherRouter = (
 			.mutation(({ ctx, input }) =>
 				service.publishTask(ctx.session.user.id, input.taskId)
 			),
+		refreshAccountStatus: protectedProcedure.mutation(({ ctx }) =>
+			service.refreshAccountStatus(ctx.session.user.id)
+		),
+		startLogin: protectedProcedure.mutation(({ ctx }) =>
+			service.startLogin(ctx.session.user.id)
+		),
 	});
 
 export const xiaohongshuPublisherRouter = createXiaohongshuPublisherRouter();

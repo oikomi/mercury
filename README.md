@@ -49,6 +49,18 @@ npm run dev
 Open [http://localhost:3001](http://localhost:3001) in your browser to see the fullstack application.
 Use the Expo Go app to run the mobile application.
 
+## Restart the full development environment
+
+This command requires Docker, Bun, `lsof`, `apps/web/.env`, and `apps/native/.env`.
+
+Run the restart script to restart PostgreSQL, Web, Native, and TUI together with combined foreground logs:
+
+```bash
+./restart.sh
+```
+
+Pressing Ctrl+C stops every application and PostgreSQL cleanly.
+
 ## UI Customization
 
 React web apps in this stack share shadcn/ui primitives through `packages/ui`.
@@ -97,6 +109,7 @@ mercury/
 ## Available Scripts
 
 - `npm run dev`: Start all applications in development mode
+- `./restart.sh`: Restart PostgreSQL, Web, Native, and TUI; stop all services on exit
 - `npm run build`: Build all applications
 - `npm run dev:web`: Start only the web application
 - `npm run check-types`: Check TypeScript types across all apps

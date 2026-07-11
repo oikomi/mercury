@@ -2,11 +2,56 @@ import { describe, expect, it } from "vitest";
 
 import {
 	createPublishTaskInputSchema,
+	generateDraftInputSchema,
 	getTaskInputSchema,
 	normalizeTopics,
 	publishTaskInputSchema,
 	xiaohongshuVisibilityValues,
 } from "./schema";
+
+describe("generateDraftInputSchema", () => {
+	it("accepts a supported image data URL and optional intent", () => {
+		expect(generateDraftInputSchema).toBeDefined();
+		if (!generateDraftInputSchema) {
+			return;
+		}
+
+		const result = generateDraftInputSchema.parse({
+			imageDataUrl: "data:image/png;base64,iVBORw0KGgo=",
+			intent: "轻松吐槽服务器故障",
+		});
+
+		expect(result.intent).toBe("轻松吐槽服务器故障");
+	});
+
+	it.each([
+		"data:text/plain;base64,SGVsbG8=",
+		"https://example.com/a.png",
+	])("rejects unsupported image input %s", (imageDataUrl) => {
+		expect(generateDraftInputSchema).toBeDefined();
+		if (!generateDraftInputSchema) {
+			return;
+		}
+
+		expect(generateDraftInputSchema.safeParse({ imageDataUrl }).success).toBe(
+			false
+		);
+	});
+
+	it("rejects intent longer than 500 characters", () => {
+		expect(generateDraftInputSchema).toBeDefined();
+		if (!generateDraftInputSchema) {
+			return;
+		}
+
+		expect(
+			generateDraftInputSchema.safeParse({
+				imageDataUrl: "data:image/png;base64,iVBORw0KGgo=",
+				intent: "a".repeat(501),
+			}).success
+		).toBe(false);
+	});
+});
 
 describe("createPublishTaskInputSchema", () => {
 	it("accepts a valid image-text note payload", () => {

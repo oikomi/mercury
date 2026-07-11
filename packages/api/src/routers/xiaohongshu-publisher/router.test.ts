@@ -1,8 +1,9 @@
 import type { TRPCError } from "@trpc/server";
-import { describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { router } from "../../index";
 import { appRouter } from "../index";
+import type { XiaohongshuAiDraftGenerator } from "./ai-draft";
 import { createMemoryXiaohongshuPublisherRepository } from "./memory-repository";
 import { createMockXiaohongshuPublishProvider } from "./mock-provider";
 import { createXiaohongshuPublisherRouter } from "./router";
@@ -28,17 +29,66 @@ const session = {
 	},
 };
 
+const PNG_DATA_URL =
+	"data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAusB9Y9Zl1sAAAAASUVORK5CYII=";
+const generateDraft = vi.fn(async () => ({
+	content: "生成正文",
+	mediaPath: "/tmp/generated.png",
+	title: "生成标题",
+	topics: ["截图"],
+}));
+const aiDraftGenerator: XiaohongshuAiDraftGenerator = {
+	generate: generateDraft,
+};
+
 const createTestRouter = () =>
 	router({
 		xiaohongshuPublisher: createXiaohongshuPublisherRouter(
 			createXiaohongshuPublisherService({
 				provider: createMockXiaohongshuPublishProvider(),
 				repository: createMemoryXiaohongshuPublisherRepository(),
-			})
+			}),
+			aiDraftGenerator
 		),
 	});
 
 describe("xiaohongshuPublisher router", () => {
+	beforeEach(() => {
+		generateDraft.mockClear();
+	});
+
+	it("generates a screenshot draft for an authenticated user", async () => {
+		const caller = createTestRouter().createCaller({
+			auth: null,
+			session,
+		});
+		const publisher =
+			caller.xiaohongshuPublisher as typeof caller.xiaohongshuPublisher & {
+				generateDraft?: (input: {
+					imageDataUrl: string;
+					intent?: string;
+				}) => Promise<{
+					mediaPath: string;
+				}>;
+			};
+
+		expect(publisher.generateDraft).toBeTypeOf("function");
+		if (!publisher.generateDraft) {
+			return;
+		}
+
+		const draft = await publisher.generateDraft({
+			imageDataUrl: PNG_DATA_URL,
+			intent: "轻松一点",
+		});
+
+		expect(draft.mediaPath).toBe("/tmp/generated.png");
+		expect(generateDraft).toHaveBeenCalledWith({
+			imageDataUrl: PNG_DATA_URL,
+			intent: "轻松一点",
+		});
+	});
+
 	it("creates, publishes, and reads a task for an authenticated user", async () => {
 		const caller = createTestRouter().createCaller({
 			auth: null,
@@ -79,6 +129,19 @@ describe("xiaohongshuPublisher router", () => {
 
 		await expect(
 			caller.xiaohongshuPublisher.listTasks({ limit: 5 })
+		).rejects.toEqual(
+			expect.objectContaining<Partial<TRPCError>>({ code: "UNAUTHORIZED" })
+		);
+		const publisher =
+			caller.xiaohongshuPublisher as typeof caller.xiaohongshuPublisher & {
+				generateDraft?: (input: { imageDataUrl: string }) => Promise<unknown>;
+			};
+		expect(publisher.generateDraft).toBeTypeOf("function");
+		if (!publisher.generateDraft) {
+			return;
+		}
+		await expect(
+			publisher.generateDraft({ imageDataUrl: PNG_DATA_URL })
 		).rejects.toEqual(
 			expect.objectContaining<Partial<TRPCError>>({ code: "UNAUTHORIZED" })
 		);

@@ -1,7 +1,12 @@
 import { access, mkdir } from "node:fs/promises";
 import path from "node:path";
 
-import { type BrowserContext, chromium, type Page } from "playwright";
+import {
+	type BrowserContext,
+	chromium,
+	type Page,
+	type Request,
+} from "playwright";
 
 import type {
 	XiaohongshuPublishInput,
@@ -21,11 +26,25 @@ interface PublishConfirmationEvidence {
 	successVisible: boolean;
 }
 
+interface CdpDomNode {
+	attributes?: string[];
+	children?: CdpDomNode[];
+	nodeId: number;
+	nodeName: string;
+	nodeType: number;
+	nodeValue: string;
+	shadowRoots?: CdpDomNode[];
+}
+
 const CREATOR_URL = "https://creator.xiaohongshu.com/";
+const CREATOR_API_HOST = "creator.xiaohongshu.com";
 const PUBLIC_SITE_URL = "https://www.xiaohongshu.com/";
 const LOGIN_TIMEOUT_MS = 180_000;
 const PAGE_TIMEOUT_MS = 30_000;
 const RESULT_TIMEOUT_MS = 15_000;
+const CREATOR_API_IDLE_MS = 1500;
+const CREATOR_API_IDLE_TIMEOUT_MS = 15_000;
+const CREATOR_API_IDLE_POLL_MS = 100;
 const SAFE_FILE_NAME_PATTERN = /[^a-zA-Z0-9_-]/gu;
 const TRAILING_SLASH_PATTERN = /\/$/u;
 const PUBLIC_NOTE_PATH_PATTERN = /^\/explore\/[a-zA-Z0-9_-]+\/?$/u;
@@ -36,8 +55,8 @@ const READY_TEXT_PATTERN = /发布笔记|发布管理|数据看板|创作中心/
 const SUCCESS_TEXT_PATTERN = /发布成功|笔记发布成功|提交成功/u;
 const VISIBILITY_TRIGGER_PATTERN = /公开可见|公开|可见范围/u;
 const TITLE_PLACEHOLDER_PATTERN = /填写标题|标题/u;
-const PUBLISH_BUTTON_TEXT = "发布";
 const RESULT_LINK_PATTERN = /查看笔记|查看作品|查看详情/u;
+const TRACKED_REQUEST_TYPES = new Set(["fetch", "xhr"]);
 
 const normalizePublicNoteUrl = (candidate: string | null): string | null => {
 	if (!candidate) {
@@ -158,11 +177,166 @@ export const fillDescription = async (
 		.fill(description, { timeout: PAGE_TIMEOUT_MS });
 };
 
+const getCdpNodeChildren = (node: CdpDomNode): CdpDomNode[] => [
+	...(node.children ?? []),
+	...(node.shadowRoots ?? []),
+];
+
+const findCdpNode = (
+	node: CdpDomNode,
+	predicate: (candidate: CdpDomNode) => boolean
+): CdpDomNode | undefined => {
+	if (predicate(node)) {
+		return node;
+	}
+
+	for (const child of getCdpNodeChildren(node)) {
+		const match = findCdpNode(child, predicate);
+		if (match) {
+			return match;
+		}
+	}
+};
+
+const getCdpAttribute = (node: CdpDomNode, name: string): string | null => {
+	const attributes = node.attributes ?? [];
+	const nameIndex = attributes.indexOf(name);
+	return nameIndex === -1 ? null : (attributes[nameIndex + 1] ?? null);
+};
+
+const containsExactText = (node: CdpDomNode, text: string): boolean => {
+	if (node.nodeName === "#text" && node.nodeValue.trim() === text) {
+		return true;
+	}
+
+	return getCdpNodeChildren(node).some((child) =>
+		containsExactText(child, text)
+	);
+};
+
+const findPublishButtonNodeId = (root: CdpDomNode): number => {
+	const host = findCdpNode(
+		root,
+		({ nodeName }) => nodeName === "XHS-PUBLISH-BTN"
+	);
+	if (!host) {
+		throw new Error("Could not find the Xiaohongshu publish control.");
+	}
+
+	const submitText = getCdpAttribute(host, "submit-text") ?? "发布";
+	const button = findCdpNode(
+		host,
+		(candidate) =>
+			candidate.nodeName === "BUTTON" &&
+			containsExactText(candidate, submitText)
+	);
+	if (!button) {
+		throw new Error("Could not find the publish button in its shadow root.");
+	}
+
+	return button.nodeId;
+};
+
+const getQuadCenter = (quad: number[]): { x: number; y: number } => {
+	const [x1 = Number.NaN, y1 = Number.NaN, x2 = Number.NaN, y2 = Number.NaN] =
+		quad;
+	const [x3 = Number.NaN, y3 = Number.NaN, x4 = Number.NaN, y4 = Number.NaN] =
+		quad.slice(4);
+	const coordinates = [x1, y1, x2, y2, x3, y3, x4, y4];
+	if (!coordinates.every(Number.isFinite)) {
+		throw new Error("The Xiaohongshu publish button has no clickable box.");
+	}
+
+	return {
+		x: (x1 + x2 + x3 + x4) / 4,
+		y: (y1 + y2 + y3 + y4) / 4,
+	};
+};
+
 export const clickPublish = async (page: Page): Promise<void> => {
-	await page
-		.getByText(PUBLISH_BUTTON_TEXT, { exact: true })
-		.last()
-		.click({ timeout: PAGE_TIMEOUT_MS });
+	const session = await page.context().newCDPSession(page);
+	try {
+		await session.send("DOM.enable");
+		const { root } = await session.send("DOM.getDocument", {
+			depth: -1,
+			pierce: true,
+		});
+		const nodeId = findPublishButtonNodeId(root);
+		const { model } = await session.send("DOM.getBoxModel", { nodeId });
+		const { x, y } = getQuadCenter(model.border);
+		await page.mouse.click(x, y);
+	} finally {
+		await session.detach().catch(() => undefined);
+	}
+};
+
+const isCreatorApiRequest = (request: Request): boolean => {
+	if (!TRACKED_REQUEST_TYPES.has(request.resourceType())) {
+		return false;
+	}
+
+	try {
+		return new URL(request.url()).hostname === CREATOR_API_HOST;
+	} catch {
+		return false;
+	}
+};
+
+export const runAndWaitForCreatorApiIdle = async (
+	page: Page,
+	operation: () => Promise<void>
+): Promise<void> => {
+	const pendingRequests = new Set<Request>();
+	let lastActivityAt = Date.now();
+	const handleRequest = (request: Request): void => {
+		if (isCreatorApiRequest(request)) {
+			pendingRequests.add(request);
+			lastActivityAt = Date.now();
+		}
+	};
+	const handleRequestFinished = (request: Request): void => {
+		if (pendingRequests.delete(request)) {
+			lastActivityAt = Date.now();
+		}
+	};
+
+	page.on("request", handleRequest);
+	page.on("requestfailed", handleRequestFinished);
+	page.on("requestfinished", handleRequestFinished);
+	try {
+		await operation();
+		await new Promise<void>((resolve, reject) => {
+			const deadline = Date.now() + CREATOR_API_IDLE_TIMEOUT_MS;
+			const checkIdle = (): void => {
+				const currentTime = Date.now();
+				const idleDuration = currentTime - lastActivityAt;
+				if (pendingRequests.size === 0 && idleDuration >= CREATOR_API_IDLE_MS) {
+					resolve();
+					return;
+				}
+
+				if (currentTime >= deadline) {
+					reject(
+						new Error(
+							`Xiaohongshu form did not become idle (${pendingRequests.size} requests pending).`
+						)
+					);
+					return;
+				}
+
+				setTimeout(
+					checkIdle,
+					Math.min(CREATOR_API_IDLE_POLL_MS, deadline - currentTime)
+				);
+			};
+
+			checkIdle();
+		});
+	} finally {
+		page.off("request", handleRequest);
+		page.off("requestfailed", handleRequestFinished);
+		page.off("requestfinished", handleRequestFinished);
+	}
 };
 
 const applyVisibility = async (
@@ -188,13 +362,18 @@ const fillAndSubmitPublishForm = async (
 	page: Page,
 	input: XiaohongshuPublishInput
 ): Promise<void> => {
-	await uploadMedia(page, input.media);
-	await page
-		.getByPlaceholder(TITLE_PLACEHOLDER_PATTERN)
-		.first()
-		.fill(input.title, { timeout: PAGE_TIMEOUT_MS });
-	await fillDescription(page, buildDescription(input));
-	await applyVisibility(page, input.visibility);
+	await runAndWaitForCreatorApiIdle(page, async () => {
+		await uploadMedia(page, input.media);
+		await page
+			.getByPlaceholder(TITLE_PLACEHOLDER_PATTERN)
+			.first()
+			.fill(input.title, { timeout: PAGE_TIMEOUT_MS });
+		await fillDescription(page, buildDescription(input));
+		await applyVisibility(page, input.visibility);
+		await page
+			.locator('xhs-publish-btn[submit-disabled="false"]')
+			.waitFor({ state: "visible", timeout: PAGE_TIMEOUT_MS });
+	});
 	await clickPublish(page);
 };
 

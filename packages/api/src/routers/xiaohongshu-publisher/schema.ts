@@ -1,6 +1,13 @@
 import { z } from "zod";
 
 const LEADING_HASHTAGS_PATTERN = /^#+/;
+const IMAGE_DATA_URL_PATTERN =
+	/^data:image\/(?:png|jpeg|webp);base64,[a-zA-Z0-9+/=]+$/u;
+
+export const generateDraftInputSchema = z.object({
+	imageDataUrl: z.string().max(14_000_000).regex(IMAGE_DATA_URL_PATTERN),
+	intent: z.string().trim().max(500).optional(),
+});
 
 export const xiaohongshuVisibilityValues = [
 	"public",
@@ -72,6 +79,7 @@ export type XiaohongshuMedia = z.infer<typeof xiaohongshuMediaSchema>;
 export type CreatePublishTaskInput = z.input<
 	typeof createPublishTaskInputSchema
 >;
+export type GenerateDraftInput = z.infer<typeof generateDraftInputSchema>;
 export type NormalizedPublishTaskInput = z.output<
 	typeof createPublishTaskInputSchema
 >;

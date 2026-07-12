@@ -53,6 +53,10 @@ import { type FormEvent, useState } from "react";
 
 import { queryClient, trpc } from "@/utils/trpc";
 
+import ScreenshotDraftGenerator, {
+	type GeneratedDraft,
+} from "./screenshot-draft-generator";
+
 const TOPIC_SEPARATOR_PATTERN = /[,\s，]+/u;
 const PATH_SEPARATOR_PATTERN = /[\\/]/u;
 
@@ -290,6 +294,7 @@ function RecentTasksCard({ isLoading, tasks }: RecentTasksCardProps) {
 export default function XiaohongshuPublisher() {
 	const [content, setContent] = useState("");
 	const [feedback, setFeedback] = useState<FeedbackState | null>(null);
+	const [generatedMediaPath, setGeneratedMediaPath] = useState("");
 	const [mediaPath, setMediaPath] = useState("");
 	const [title, setTitle] = useState("");
 	const [topics, setTopics] = useState("");
@@ -304,6 +309,9 @@ export default function XiaohongshuPublisher() {
 	const createTask = useMutation(
 		trpc.xiaohongshuPublisher.createTask.mutationOptions()
 	);
+	const generateDraft = useMutation(
+		trpc.xiaohongshuPublisher.generateDraft.mutationOptions()
+	);
 	const publishTask = useMutation(
 		trpc.xiaohongshuPublisher.publishTask.mutationOptions()
 	);
@@ -314,13 +322,14 @@ export default function XiaohongshuPublisher() {
 		trpc.xiaohongshuPublisher.startLogin.mutationOptions()
 	);
 
+	const effectiveMediaPath = generatedMediaPath.trim() || mediaPath.trim();
 	const checks: PreflightCheck[] = [
 		{ id: "title", label: "标题", valid: title.trim().length > 0 },
 		{ id: "content", label: "正文", valid: content.trim().length > 0 },
 		{
 			id: "media",
-			label: "媒体路径",
-			valid: mediaPath.trim().length > 0,
+			label: "媒体素材",
+			valid: effectiveMediaPath.length > 0,
 		},
 		{
 			id: "account",
@@ -356,6 +365,14 @@ export default function XiaohongshuPublisher() {
 
 	const handleStartLogin = (): Promise<void> =>
 		runAccountAction(() => startLogin.mutateAsync());
+
+	const handleGeneratedDraft = (draft: GeneratedDraft): void => {
+		setContent(draft.content);
+		setGeneratedMediaPath(draft.mediaPath);
+		setTitle(draft.title);
+		setTopics(draft.topics.map((topic) => `#${topic}`).join(" "));
+	};
+
 	const selectedVisibilityLabel =
 		visibilityOptions.find((option) => option.value === visibility)?.label ??
 		"公开";
@@ -374,7 +391,7 @@ export default function XiaohongshuPublisher() {
 
 		setFeedback(null);
 		try {
-			const normalizedMediaPath = mediaPath.trim();
+			const normalizedMediaPath = effectiveMediaPath;
 			const isVideo = normalizedMediaPath.toLowerCase().endsWith(".mp4");
 			const task = await createTask.mutateAsync({
 				content,
@@ -448,6 +465,12 @@ export default function XiaohongshuPublisher() {
 							</CardHeader>
 							<CardContent>
 								<FieldGroup>
+									<ScreenshotDraftGenerator
+										disabled={isPublishing}
+										onGenerate={generateDraft.mutateAsync}
+										onGenerated={handleGeneratedDraft}
+										onMediaInvalidated={() => setGeneratedMediaPath("")}
+									/>
 									<Field>
 										<FieldLabel htmlFor="xhs-title">标题</FieldLabel>
 										<Input
@@ -505,7 +528,7 @@ export default function XiaohongshuPublisher() {
 									</div>
 									<Field>
 										<FieldLabel htmlFor="xhs-media-path">
-											本机媒体路径
+											本机媒体路径（可选）
 										</FieldLabel>
 										<Input
 											id="xhs-media-path"

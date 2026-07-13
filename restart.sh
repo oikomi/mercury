@@ -15,7 +15,12 @@ PID_FILE="${STATE_DIR}/mercury-restart.pid"
 HEALTH_TIMEOUT="${MERCURY_RESTART_HEALTH_TIMEOUT:-60}"
 SHUTDOWN_TIMEOUT="${MERCURY_RESTART_SHUTDOWN_TIMEOUT:-10}"
 WEB_PORT="${MERCURY_WEB_PORT:-18123}"
-WEB_ORIGIN="${MERCURY_WEB_ORIGIN:-http://localhost:${WEB_PORT}}"
+WEB_URL="http://localhost:${WEB_PORT}"
+WEB_HEALTH_URL="${WEB_URL}/api/trpc/healthCheck?batch=1&input=%7B%7D"
+DATABASE_URL="${DATABASE_URL:-postgresql://postgres:password@localhost:5432/mercury}"
+XHS_ARTIFACT_DIR="${XHS_ARTIFACT_DIR:-${ROOT_DIR}/.data/xhs-artifacts}"
+XHS_PROFILE_DIR="${XHS_PROFILE_DIR:-${ROOT_DIR}/.data/xhs-profile}"
+XHS_PROVIDER="${XHS_PROVIDER:-playwright}"
 DEV_PID=""
 CLEANUP_STARTED=0
 
@@ -49,13 +54,11 @@ validate_environment() {
   [[ "${WEB_PORT}" =~ ^[1-9][0-9]{0,4}$ ]] && ((10#${WEB_PORT} <= 65535)) ||
     die "MERCURY_WEB_PORT must be an integer between 1 and 65535"
 
-  for command_name in npm bun docker lsof pgrep ps; do
+  for command_name in npm curl docker lsof pgrep ps; do
     require_command "${command_name}"
   done
 
   docker info >/dev/null 2>&1 || die "Docker is not reachable"
-  [[ -f "${ROOT_DIR}/apps/web/.env" ]] || die "apps/web/.env is required"
-  [[ -f "${ROOT_DIR}/apps/native/.env" ]] || die "apps/native/.env is required"
 }
 
 process_is_running() {
@@ -198,6 +201,43 @@ wait_for_database() {
   die "timed out waiting for mercury-postgres to become healthy"
 }
 
+prepare_runtime_environment() {
+  export DATABASE_URL
+  export MERCURY_WEB_PORT="${WEB_PORT}"
+  export XHS_ARTIFACT_DIR
+  export XHS_PROFILE_DIR
+  export XHS_PROVIDER
+}
+
+wait_for_http_service() {
+  local elapsed_seconds=0
+  local service_name="$1"
+  local service_url="$2"
+
+  while ((elapsed_seconds < HEALTH_TIMEOUT)); do
+    if curl --fail --silent --output /dev/null --max-time 1 "${service_url}"; then
+      return 0
+    fi
+
+    process_is_running "${DEV_PID}" ||
+      die "development service exited while waiting for ${service_name}"
+
+    sleep 1
+    ((elapsed_seconds += 1))
+  done
+
+  die "timed out waiting for ${service_name} at ${service_url}"
+}
+
+print_service_summary() {
+  printf '\n'
+  log "Xiaohongshu publisher is ready"
+  log "  Web:      ${WEB_URL}"
+  log "  Database: localhost:5432 (mercury)"
+  log "Press Ctrl+C to stop the managed services"
+  printf '\n'
+}
+
 main() {
   local dev_status
 
@@ -207,7 +247,7 @@ main() {
   mkdir -p -- "${STATE_DIR}"
   stop_previous_session
   assert_port_available "${WEB_PORT}"
-  assert_port_available 8081
+  prepare_runtime_environment
   trap 'cleanup "$?"' EXIT
   trap 'cleanup 130' INT
   trap 'cleanup 143' TERM
@@ -222,14 +262,16 @@ main() {
   log "Waiting for database health"
   wait_for_database
 
-  export BETTER_AUTH_URL="${WEB_ORIGIN}"
-  export CORS_ORIGIN="${WEB_ORIGIN}"
-  export EXPO_PUBLIC_SERVER_URL="${WEB_ORIGIN}"
-  export MERCURY_WEB_PORT="${WEB_PORT}"
+  log "Applying database migrations"
+  npm run db:migrate
 
-  log "Starting development services (Web: ${WEB_ORIGIN})"
+  log "Starting Xiaohongshu publisher"
   npm run dev <&0 &
   DEV_PID=$!
+
+  log "Waiting for Web application health"
+  wait_for_http_service "Web application" "${WEB_HEALTH_URL}"
+  print_service_summary
 
   set +e
   wait "${DEV_PID}"

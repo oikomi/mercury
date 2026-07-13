@@ -1,0 +1,98 @@
+- generic [active] [ref=e1]:
+  - link "跳到主要内容" [ref=e2] [cursor=pointer]:
+    - /url: "#main-content"
+  - main [ref=e3]:
+    - generic [ref=e4]:
+      - heading "Mercury 小红书发布台" [level=1] [ref=e7]:
+        - generic [ref=e8]: Mercury
+        - generic [ref=e9]: 小红书发布台
+      - region "发布账号" [ref=e10]:
+        - generic [ref=e11]:
+          - generic [ref=e15]:
+            - paragraph [ref=e16]: 我的小红书账号
+            - paragraph [ref=e17]: 发布账号
+          - generic [ref=e18]: 检查中…
+        - generic [ref=e20]:
+          - button "重新检测" [disabled]
+          - button "打开登录窗口" [disabled]
+      - generic [ref=e22]:
+        - generic [ref=e23]:
+          - generic [ref=e24]:
+            - generic [ref=e25]: 素材与 AI
+            - generic [ref=e29]: 内容截图
+            - generic [ref=e30]: AI · MAX
+          - region "AI 文案生成" [ref=e33]:
+            - generic [ref=e34]:
+              - button "粘贴截图" [ref=e35]:
+                - generic [ref=e37]: 在这里粘贴截图
+                - generic [ref=e38]: 支持 PNG、JPEG 或 WebP，最大 10 MB
+              - generic [ref=e40]:
+                - generic [ref=e41]:
+                  - generic [ref=e42]: 文案风格
+                  - combobox "文案风格" [ref=e43]:
+                    - generic [ref=e44]: 按日期轮换
+                    - img: ▼
+                  - textbox [ref=e45]: auto
+                - generic [ref=e46]:
+                  - generic [ref=e47]: 补充意图（可选）
+                  - group [ref=e48]:
+                    - textbox "补充意图（可选）" [ref=e49]:
+                      - /placeholder: 例如：轻松吐槽这次服务器故障…
+                    - group [ref=e50]: 0/500
+              - generic [ref=e51]:
+                - button "生成文案" [disabled]
+        - generic [ref=e52]:
+          - generic [ref=e53]:
+            - generic [ref=e54]: 发布内容
+            - generic [ref=e58]: 图文笔记
+            - generic [ref=e59]: 0/4 已就绪
+          - generic [ref=e62]:
+            - generic [ref=e63]:
+              - generic [ref=e64]: 标题
+              - group [ref=e65]:
+                - textbox "标题" [ref=e66]:
+                  - /placeholder: 输入笔记标题…
+                - group [ref=e67]
+                - group [ref=e71]: 0/20
+            - generic [ref=e72]:
+              - generic [ref=e73]: 正文
+              - group [ref=e74]:
+                - textbox "正文" [ref=e75]:
+                  - /placeholder: 输入正文…
+                - group [ref=e76]:
+                  - generic [ref=e77]: 0/5000
+            - generic [ref=e78]:
+              - generic [ref=e79]:
+                - generic [ref=e80]: 话题
+                - group [ref=e81]:
+                  - textbox "话题" [ref=e82]:
+                    - /placeholder: "例如：#咖啡 #探店…"
+                  - group [ref=e83]
+              - generic [ref=e87]:
+                - generic [ref=e88]: 可见性
+                - combobox "可见性" [ref=e89]:
+                  - generic [ref=e90]: 公开
+                  - img: ▼
+                - textbox [ref=e91]: public
+            - generic [ref=e92]:
+              - generic [ref=e93]: 本机媒体路径（可选）
+              - group [ref=e94]:
+                - textbox "本机媒体路径（可选）" [ref=e95]:
+                  - /placeholder: 例如：/Users/name/Pictures/note.png…
+                - group [ref=e96]
+          - generic [ref=e99]:
+            - generic [ref=e100]:
+              - generic [ref=e101]:
+                - generic [ref=e105]: 发布前检查
+                - generic [ref=e106]: 0/4
+              - list [ref=e108]:
+                - listitem [ref=e109]:
+                  - generic [ref=e110]: 标题
+                - listitem [ref=e111]:
+                  - generic [ref=e112]: 正文
+                - listitem [ref=e113]:
+                  - generic [ref=e114]: 媒体素材
+                - listitem [ref=e115]:
+                  - generic [ref=e116]: 账号会话
+            - button "发布到小红书" [disabled]
+  - region "Notifications alt+T"

@@ -4,12 +4,10 @@ import { fetchRequestHandler } from "@trpc/server/adapters/fetch";
 import type { NextRequest } from "next/server";
 
 import { withEvlog } from "@/lib/evlog";
-import { identifyEvlogUser } from "@/lib/evlog-auth";
 
-async function handler(req: NextRequest) {
-	await identifyEvlogUser(req);
+function handler(req: NextRequest) {
 	return fetchRequestHandler({
-		createContext: () => createContext(req),
+		createContext,
 		endpoint: "/api/trpc",
 		req,
 		router: appRouter,

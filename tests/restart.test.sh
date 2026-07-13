@@ -4,6 +4,7 @@ set -Eeuo pipefail
 
 ROOT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
 SOURCE_RESTART_SCRIPT="${ROOT_DIR}/restart.sh"
+ROOT_PACKAGE_JSON="${ROOT_DIR}/package.json"
 WEB_PACKAGE_JSON="${ROOT_DIR}/apps/web/package.json"
 TEST_DIR="$(mktemp -d "${TMPDIR:-/tmp}/mercury-restart-test.XXXXXX")"
 TEST_DIR="$(cd -- "${TEST_DIR}" && pwd)"
@@ -111,14 +112,15 @@ cleanup_test_environment() {
 trap cleanup_test_environment EXIT
 
 [[ -x "${SOURCE_RESTART_SCRIPT}" ]] || fail "restart.sh must exist and be executable"
-grep -Fq -- 'next dev --port ${MERCURY_WEB_PORT:-18123}' "${WEB_PACKAGE_JSON}" ||
+grep -Fq -- \
+  '"dev": "nx run-many -t dev --projects=web --outputStyle=stream"' \
+  "${ROOT_PACKAGE_JSON}" || fail "root dev script must stream only the Web project"
+grep -Fq -- 'next dev --hostname 0.0.0.0 --port ${MERCURY_WEB_PORT:-18123}' "${WEB_PACKAGE_JSON}" ||
   fail "web dev script must honor MERCURY_WEB_PORT"
 
-mkdir -p -- "${SHIM_DIR}" "${FIXTURE_DIR}/apps/web" "${FIXTURE_DIR}/apps/native"
+mkdir -p -- "${SHIM_DIR}" "${FIXTURE_DIR}"
 cp -- "${SOURCE_RESTART_SCRIPT}" "${RESTART_SCRIPT}"
 chmod +x "${RESTART_SCRIPT}"
-: >"${FIXTURE_DIR}/apps/web/.env"
-: >"${FIXTURE_DIR}/apps/native/.env"
 : >"${LOG_FILE}"
 printf '%s' "${EXPECTED_STDIN_BYTE}" >"${STDIN_FILE}"
 
@@ -202,9 +204,11 @@ if [[ "$*" == "run dev" ]]; then
   }
 
   trap stop_dev INT TERM
-	printf 'dev web port %s\n' "${MERCURY_WEB_PORT:-<missing>}" >>"${MERCURY_TEST_LOG}"
-	printf 'dev auth url %s\n' "${BETTER_AUTH_URL:-<missing>}" >>"${MERCURY_TEST_LOG}"
-	printf 'dev native server url %s\n' "${EXPO_PUBLIC_SERVER_URL:-<missing>}" >>"${MERCURY_TEST_LOG}"
+  printf 'dev web port %s\n' "${MERCURY_WEB_PORT:-<missing>}" >>"${MERCURY_TEST_LOG}"
+  printf 'dev database url %s\n' "${DATABASE_URL:-<missing>}" >>"${MERCURY_TEST_LOG}"
+  printf 'dev xhs artifact dir %s\n' "${XHS_ARTIFACT_DIR:-<missing>}" >>"${MERCURY_TEST_LOG}"
+  printf 'dev xhs profile dir %s\n' "${XHS_PROFILE_DIR:-<missing>}" >>"${MERCURY_TEST_LOG}"
+  printf 'dev xhs provider %s\n' "${XHS_PROVIDER:-<missing>}" >>"${MERCURY_TEST_LOG}"
   printf '%s\n' "$$" >"${MERCURY_TEST_DEV_PID_FILE}"
 
   if IFS= read -r -n 1 DEV_STDIN_BYTE; then
@@ -247,10 +251,21 @@ fi
 exit 1
 SHIM
 
-cat >"${SHIM_DIR}/bun" <<'SHIM'
+cat >"${SHIM_DIR}/curl" <<'SHIM'
 #!/usr/bin/env bash
 
-exit 0
+set -Eeuo pipefail
+
+printf 'curl %s\n' "$*" >>"${MERCURY_TEST_LOG}"
+
+REQUEST_URL="${!#}"
+EXPECTED_WEB_HEALTH_URL="http://localhost:${MERCURY_WEB_PORT:-18123}/api/trpc/healthCheck?batch=1&input=%7B%7D"
+
+if [[ "${REQUEST_URL}" == "${EXPECTED_WEB_HEALTH_URL}" ]]; then
+  exit 0
+fi
+
+exit 1
 SHIM
 
 cat >"${SHIM_DIR}/lsof" <<'SHIM'
@@ -269,7 +284,11 @@ fi
 exit 1
 SHIM
 
-chmod +x "${SHIM_DIR}/npm" "${SHIM_DIR}/docker" "${SHIM_DIR}/bun" "${SHIM_DIR}/lsof"
+chmod +x \
+  "${SHIM_DIR}/npm" \
+  "${SHIM_DIR}/docker" \
+  "${SHIM_DIR}/curl" \
+  "${SHIM_DIR}/lsof"
 
 wait_for_log_line() {
   local expected_line="$1"
@@ -278,6 +297,27 @@ wait_for_log_line() {
 
   for ((attempt = 0; attempt < max_attempts; attempt += 1)); do
     if grep -Fqx -- "${expected_line}" "${LOG_FILE}" 2>/dev/null; then
+      return 0
+    fi
+
+    if [[ -n "${SUPERVISOR_PID}" ]] && ! kill -0 "${SUPERVISOR_PID}" 2>/dev/null; then
+      return 1
+    fi
+
+    sleep 0.05
+  done
+
+  return 1
+}
+
+wait_for_output_text() {
+  local expected_text="$1"
+  local output_file="${2:-${OUTPUT_FILE}}"
+  local attempt
+  local max_attempts=100
+
+  for ((attempt = 0; attempt < max_attempts; attempt += 1)); do
+    if grep -Fq -- "${expected_text}" "${output_file}" 2>/dev/null; then
       return 0
     fi
 
@@ -369,6 +409,8 @@ launch_supervisor "${OUTPUT_FILE}"
 SUPERVISOR_PID="${LAUNCHED_SUPERVISOR_PID}"
 
 wait_for_log_line "dev ready" || fail "development process did not become ready"
+wait_for_output_text "Xiaohongshu publisher is ready" ||
+  fail "publisher did not print its ready summary"
 
 supervisor_command="$(ps -p "${SUPERVISOR_PID}" -o command=)"
 [[ "${supervisor_command}" == *"${RESTART_SCRIPT}"* ]] ||
@@ -399,21 +441,35 @@ wait_for_process_exit "${cleanup_pid}" || fail "cleanup shim did not stop"
   fail "expected supervisor exit status 143, got ${supervisor_status}"
 
 assert_count 1 "npm run db:start"
+assert_count 1 "npm run db:migrate"
 assert_count 1 "npm run dev"
 assert_count 1 "dev received TERM"
 assert_count 2 "npm run db:stop"
 assert_count 1 "docker inspect mercury-postgres healthy"
+assert_count 1 \
+  "dev database url postgresql://postgres:password@localhost:5432/mercury"
+assert_count 1 "dev xhs artifact dir ${FIXTURE_DIR}/.data/xhs-artifacts"
+assert_count 1 "dev xhs profile dir ${FIXTURE_DIR}/.data/xhs-profile"
+assert_count 1 "dev xhs provider playwright"
 
 db_start_line="$(grep -nFx -- "npm run db:start" "${LOG_FILE}" | cut -d: -f1)"
 health_inspection_line="$(
   grep -nFx -- "docker inspect mercury-postgres healthy" "${LOG_FILE}" | cut -d: -f1
 )"
+migration_line="$(grep -nFx -- "npm run db:migrate" "${LOG_FILE}" | cut -d: -f1)"
 dev_start_line="$(grep -nFx -- "npm run dev" "${LOG_FILE}" | cut -d: -f1)"
 ((db_start_line < health_inspection_line)) || fail "database must start before health inspection"
-((health_inspection_line < dev_start_line)) || fail "database must be healthy before development services"
+((health_inspection_line < migration_line)) || fail "database must be healthy before migrations"
+((migration_line < dev_start_line)) || fail "migrations must finish before development services"
 
 grep -Fqx -- "dev stdout marker" "${OUTPUT_FILE}" || fail "development stdout was not inherited"
 grep -Fqx -- "dev stderr marker" "${OUTPUT_FILE}" || fail "development stderr was not inherited"
+grep -Fq -- "Xiaohongshu publisher is ready" "${OUTPUT_FILE}" ||
+  fail "ready summary was not printed"
+grep -Fq -- "Web:      http://localhost:18123" "${OUTPUT_FILE}" ||
+  fail "ready summary did not include the Web link"
+assert_count 1 \
+  "curl --fail --silent --output /dev/null --max-time 1 http://localhost:18123/api/trpc/healthCheck?batch=1&input=%7B%7D"
 
 [[ ! -e "${STATE_DIR}/mercury-restart.pid" ]] || fail "PID state was not removed after repeated TERM"
 
@@ -435,9 +491,9 @@ wait_for_log_count 1 "cleanup db:stop entered" ||
   fail "prior supervisor did not enter database cleanup"
 
 assert_count 1 "npm run db:start"
+assert_count 1 "npm run db:migrate"
 assert_count 1 "npm run dev"
 assert_count 1 "lsof -nP -iTCP:18123 -sTCP:LISTEN -t"
-assert_count 1 "lsof -nP -iTCP:8081 -sTCP:LISTEN -t"
 [[ ! -e "${CLEANUP_GATE_FILE}" ]] || fail "managed cleanup gate was released early"
 
 : >"${CLEANUP_GATE_FILE}"
@@ -471,11 +527,11 @@ wait_for_process_exit "${second_dev_pid}" || fail "replacement development proce
   fail "expected replacement supervisor exit status 143, got ${replacement_status}"
 
 assert_count 2 "npm run db:start"
+assert_count 2 "npm run db:migrate"
 assert_count 2 "npm run dev"
 assert_count 2 "dev received TERM"
 assert_count 4 "npm run db:stop"
 assert_count 2 "lsof -nP -iTCP:18123 -sTCP:LISTEN -t"
-assert_count 2 "lsof -nP -iTCP:8081 -sTCP:LISTEN -t"
 
 cleanup_finished_line="$(
   grep -nFx -- "cleanup db:stop finished" "${LOG_FILE}" | head -n 1 | cut -d: -f1
@@ -491,19 +547,10 @@ replacement_port_18123_line="$(
     sed -n '2p' |
     cut -d: -f1
 )"
-replacement_port_8081_line="$(
-  grep -nFx -- "lsof -nP -iTCP:8081 -sTCP:LISTEN -t" "${LOG_FILE}" |
-    sed -n '2p' |
-    cut -d: -f1
-)"
 ((cleanup_finished_line < replacement_port_18123_line)) ||
   fail "replacement probed port 18123 before prior cleanup finished"
-((cleanup_finished_line < replacement_port_8081_line)) ||
-  fail "replacement probed port 8081 before prior cleanup finished"
 ((replacement_port_18123_line < replacement_db_start_line)) ||
   fail "replacement database started before port 18123 was checked"
-((replacement_port_8081_line < replacement_db_start_line)) ||
-  fail "replacement database started before port 8081 was checked"
 ((cleanup_finished_line < replacement_db_start_line)) ||
   fail "replacement database started before prior cleanup finished"
 ((cleanup_finished_line < replacement_dev_start_line)) ||
@@ -589,6 +636,7 @@ grep -Fq -- "refusing to signal" "${OUTPUT_FILE}" ||
   fail "foreign PID error did not explain the safe action"
 assert_count 0 "npm run db:stop"
 assert_count 0 "npm run db:start"
+assert_count 0 "npm run db:migrate"
 assert_count 0 "npm run dev"
 [[ "$(<"${STATE_DIR}/mercury-restart.pid")" == "${AUXILIARY_PID}" ]] ||
   fail "foreign PID state was overwritten"
@@ -624,6 +672,7 @@ grep -Fq -- "MERCURY_RESTART_SHUTDOWN_TIMEOUT" "${REPLACEMENT_OUTPUT_FILE}" ||
   fail "shutdown timeout error did not explain how to adjust the bounded wait"
 assert_count 2 "npm run db:stop"
 assert_count 1 "npm run db:start"
+assert_count 1 "npm run db:migrate"
 assert_count 1 "npm run dev"
 
 : >"${CLEANUP_GATE_FILE}"
@@ -670,6 +719,7 @@ test_occupied_port() {
     "${OUTPUT_FILE}" || fail "occupied port ${occupied_port} error was not actionable"
   assert_count 0 "npm run db:stop"
   assert_count 0 "npm run db:start"
+  assert_count 0 "npm run db:migrate"
   assert_count 0 "npm run dev"
   assert_count 0 "lsof -nP -iTCP:5432 -sTCP:LISTEN -t"
   [[ ! -e "${STATE_DIR}/mercury-restart.pid" ]] ||
@@ -693,13 +743,16 @@ WEB_PORT="18124"
 launch_supervisor "${OUTPUT_FILE}"
 SUPERVISOR_PID="${LAUNCHED_SUPERVISOR_PID}"
 wait_for_log_count 1 "dev ready" || fail "custom-port development process did not become ready"
+wait_for_output_text "Xiaohongshu publisher is ready" ||
+  fail "custom-port publisher did not print its ready summary"
 
 assert_count 0 "lsof -nP -iTCP:18123 -sTCP:LISTEN -t"
 assert_count 1 "lsof -nP -iTCP:18124 -sTCP:LISTEN -t"
-assert_count 1 "lsof -nP -iTCP:8081 -sTCP:LISTEN -t"
 assert_count 1 "dev web port 18124"
-assert_count 1 "dev auth url http://localhost:18124"
-assert_count 1 "dev native server url http://localhost:18124"
+assert_count 1 \
+  "curl --fail --silent --output /dev/null --max-time 1 http://localhost:18124/api/trpc/healthCheck?batch=1&input=%7B%7D"
+grep -Fq -- "Web:      http://localhost:18124" "${OUTPUT_FILE}" ||
+  fail "custom-port ready summary did not include the Web link"
 process_is_running "${AUXILIARY_PID}" || fail "custom port signaled port 18123 owner"
 
 : >"${CLEANUP_GATE_FILE}"
@@ -723,7 +776,6 @@ WEB_PORT=""
 printf '%s\n' "PASS: custom web port"
 
 test_occupied_port 18123
-test_occupied_port 8081
 
 reset_case_files
 DEV_DESCENDANT_MODE="record-term"

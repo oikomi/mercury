@@ -1,6 +1,10 @@
 "use client";
 
 import {
+	XIAOHONGSHU_DRAFT_STYLE_VALUES,
+	type XiaohongshuDraftStyle,
+} from "@mercury/api/routers/xiaohongshu-publisher/constants";
+import {
 	Alert,
 	AlertDescription,
 	AlertTitle,
@@ -15,12 +19,20 @@ import {
 	AttachmentTitle,
 } from "@mercury/ui/components/attachment";
 import { Button } from "@mercury/ui/components/button";
+import { Field, FieldGroup, FieldLabel } from "@mercury/ui/components/field";
 import {
-	Field,
-	FieldDescription,
-	FieldLabel,
-} from "@mercury/ui/components/field";
-import { Textarea } from "@mercury/ui/components/textarea";
+	InputGroup,
+	InputGroupAddon,
+	InputGroupTextarea,
+} from "@mercury/ui/components/input-group";
+import {
+	Select,
+	SelectContent,
+	SelectGroup,
+	SelectItem,
+	SelectTrigger,
+	SelectValue,
+} from "@mercury/ui/components/select";
 import {
 	Tooltip,
 	TooltipContent,
@@ -46,6 +58,18 @@ const SUPPORTED_IMAGE_TYPES = new Set([
 	"image/png",
 	"image/webp",
 ]);
+const DRAFT_STYLE_OPTIONS = [
+	{ label: "按日期轮换", value: "auto" },
+	{ label: "朋友聊天", value: "chatty" },
+	{ label: "随手碎碎念", value: "notes" },
+	{ label: "现场叙事", value: "story" },
+	{ label: "克制观察", value: "observational" },
+	{ label: "轻吐槽", value: "dry_humor" },
+	{ label: "温柔共情", value: "gentle" },
+] as const satisfies readonly {
+	label: string;
+	value: XiaohongshuDraftStyle;
+}[];
 
 export interface GeneratedDraft {
 	content: string;
@@ -57,6 +81,7 @@ export interface GeneratedDraft {
 interface GenerateDraftInput {
 	imageDataUrl: string;
 	intent?: string;
+	style: XiaohongshuDraftStyle;
 }
 
 interface ScreenshotDraftGeneratorProps {
@@ -91,6 +116,9 @@ const getErrorMessage = (error: unknown): string =>
 		? error.message
 		: "AI 文案生成失败，请稍后重试。";
 
+const isDraftStyle = (value: string): value is XiaohongshuDraftStyle =>
+	XIAOHONGSHU_DRAFT_STYLE_VALUES.some((style) => style === value);
+
 const readFileAsDataUrl = (file: File): Promise<string> =>
 	new Promise((resolve, reject) => {
 		const reader = new FileReader();
@@ -112,6 +140,7 @@ export default function ScreenshotDraftGenerator({
 	onGenerated,
 	onMediaInvalidated,
 }: ScreenshotDraftGeneratorProps) {
+	const [draftStyle, setDraftStyle] = useState<XiaohongshuDraftStyle>("auto");
 	const [feedback, setFeedback] = useState<FeedbackState | null>(null);
 	const [intent, setIntent] = useState("");
 	const [isGenerating, setIsGenerating] = useState(false);
@@ -180,6 +209,12 @@ export default function ScreenshotDraftGenerator({
 		pasteTargetRef.current?.focus();
 	};
 
+	const handleDraftStyleChange = (value: string | null): void => {
+		if (value && isDraftStyle(value)) {
+			setDraftStyle(value);
+		}
+	};
+
 	const handleGenerate = async (): Promise<void> => {
 		if (!screenshot || disabled || isGenerating) {
 			return;
@@ -193,6 +228,7 @@ export default function ScreenshotDraftGenerator({
 			const draft = await onGenerate({
 				imageDataUrl,
 				...(normalizedIntent ? { intent: normalizedIntent } : {}),
+				style: draftStyle,
 			});
 			onGenerated(draft);
 			setFeedback({
@@ -212,27 +248,23 @@ export default function ScreenshotDraftGenerator({
 	};
 
 	const isBusy = disabled || isGenerating;
+	const selectedStyleLabel =
+		DRAFT_STYLE_OPTIONS.find((option) => option.value === draftStyle)?.label ??
+		"按日期轮换";
 
 	return (
-		<section aria-labelledby="xhs-ai-draft-heading" className="border-b pb-5">
-			<div className="flex flex-col gap-4">
-				<div className="flex items-center gap-2">
-					<SparklesIcon aria-hidden="true" className="size-4" />
-					<h2 className="font-medium text-sm" id="xhs-ai-draft-heading">
-						截图生成文案
-					</h2>
-				</div>
-
+		<section aria-label="AI 文案生成" className="h-full">
+			<div className="flex h-full flex-col gap-4">
 				{screenshot ? (
 					<div className="flex flex-col gap-3">
 						<Button
 							aria-label="粘贴截图以更换当前截图"
-							className="relative aspect-video h-auto w-full overflow-hidden border-dashed p-0"
+							className="relative h-[clamp(210px,30svh,300px)] w-full overflow-hidden p-0"
 							disabled={isBusy}
 							onPaste={handlePaste}
 							ref={pasteTargetRef}
 							type="button"
-							variant="outline"
+							variant="dropzone"
 						>
 							<Image
 								alt={`${screenshot.file.name} 预览`}
@@ -295,36 +327,72 @@ export default function ScreenshotDraftGenerator({
 				) : (
 					<Button
 						aria-label="粘贴截图"
-						className="min-h-40 w-full flex-col gap-3 whitespace-normal border-dashed px-6 py-8 text-center"
+						className="h-[clamp(210px,30svh,300px)] w-full flex-col gap-3 whitespace-normal px-6 py-8 text-center"
 						disabled={isBusy}
 						onPaste={handlePaste}
 						ref={pasteTargetRef}
 						type="button"
-						variant="outline"
+						variant="dropzone"
 					>
-						<ClipboardPasteIcon aria-hidden="true" />
-						<span>粘贴截图</span>
-						<span className="font-normal text-muted-foreground">
-							PNG、JPEG 或 WebP，最大 10 MB
+						<span data-slot="dropzone-icon">
+							<ClipboardPasteIcon aria-hidden="true" />
+						</span>
+						<span data-slot="dropzone-title">在这里粘贴截图</span>
+						<span data-slot="dropzone-hint">
+							支持 PNG、JPEG 或 WebP，最大 10&nbsp;MB
 						</span>
 					</Button>
 				)}
 
-				<Field>
-					<FieldLabel htmlFor="xhs-ai-intent">补充意图（可选）</FieldLabel>
-					<Textarea
-						className="min-h-20 resize-y"
-						disabled={isBusy}
-						id="xhs-ai-intent"
-						maxLength={500}
-						onChange={(event) => setIntent(event.target.value)}
-						placeholder="例如：轻松吐槽这次服务器故障"
-						value={intent}
-					/>
-					<FieldDescription className="text-right">
-						{intent.length}/500
-					</FieldDescription>
-				</Field>
+				<FieldGroup>
+					<div className="grid gap-4 sm:grid-cols-[180px_minmax(0,1fr)]">
+						<Field>
+							<FieldLabel htmlFor="xhs-ai-style">文案风格</FieldLabel>
+							<Select
+								disabled={isBusy}
+								name="draftStyle"
+								onValueChange={handleDraftStyleChange}
+								value={draftStyle}
+							>
+								<SelectTrigger className="w-full" id="xhs-ai-style">
+									<SelectValue>{selectedStyleLabel}</SelectValue>
+								</SelectTrigger>
+								<SelectContent>
+									<SelectGroup>
+										{DRAFT_STYLE_OPTIONS.map((option) => (
+											<SelectItem key={option.value} value={option.value}>
+												{option.label}
+											</SelectItem>
+										))}
+									</SelectGroup>
+								</SelectContent>
+							</Select>
+						</Field>
+
+						<Field>
+							<FieldLabel htmlFor="xhs-ai-intent">补充意图（可选）</FieldLabel>
+							<InputGroup>
+								<InputGroupTextarea
+									autoComplete="off"
+									className="min-h-24"
+									disabled={isBusy}
+									id="xhs-ai-intent"
+									maxLength={500}
+									name="intent"
+									onChange={(event) => setIntent(event.target.value)}
+									placeholder="例如：轻松吐槽这次服务器故障…"
+									value={intent}
+								/>
+								<InputGroupAddon
+									align="block-end"
+									className="justify-end tabular-nums"
+								>
+									{intent.length}/500
+								</InputGroupAddon>
+							</InputGroup>
+						</Field>
+					</div>
+				</FieldGroup>
 
 				{feedback ? (
 					<Alert
@@ -340,7 +408,7 @@ export default function ScreenshotDraftGenerator({
 					</Alert>
 				) : null}
 
-				<div className="flex justify-end">
+				<div className="mt-auto flex justify-end pt-2">
 					<Button
 						disabled={isBusy || !screenshot}
 						onClick={handleGenerate}
@@ -355,7 +423,7 @@ export default function ScreenshotDraftGenerator({
 						) : (
 							<SparklesIcon aria-hidden="true" data-icon="inline-start" />
 						)}
-						{isGenerating ? "生成中" : "生成文案"}
+						{isGenerating ? "生成中…" : "生成文案"}
 					</Button>
 				</div>
 			</div>

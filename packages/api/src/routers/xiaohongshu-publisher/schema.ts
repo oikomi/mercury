@@ -1,5 +1,10 @@
 import { z } from "zod";
 
+import {
+	XIAOHONGSHU_DRAFT_STYLE_VALUES,
+	XIAOHONGSHU_TITLE_MAX_LENGTH,
+} from "./constants";
+
 const LEADING_HASHTAGS_PATTERN = /^#+/;
 const IMAGE_DATA_URL_PATTERN =
 	/^data:image\/(?:png|jpeg|webp);base64,[a-zA-Z0-9+/=]+$/u;
@@ -7,6 +12,7 @@ const IMAGE_DATA_URL_PATTERN =
 export const generateDraftInputSchema = z.object({
 	imageDataUrl: z.string().max(14_000_000).regex(IMAGE_DATA_URL_PATTERN),
 	intent: z.string().trim().max(500).optional(),
+	style: z.enum(XIAOHONGSHU_DRAFT_STYLE_VALUES).default("auto"),
 });
 
 export const xiaohongshuVisibilityValues = [
@@ -52,7 +58,7 @@ export const xiaohongshuMediaSchema = z.object({
 export const createPublishTaskInputSchema = z.object({
 	content: z.string().trim().min(1).max(5000),
 	media: z.array(xiaohongshuMediaSchema).min(1).max(18),
-	title: z.string().trim().min(1).max(60),
+	title: z.string().trim().min(1).max(XIAOHONGSHU_TITLE_MAX_LENGTH),
 	topics: z
 		.array(z.string())
 		.default([])
@@ -79,7 +85,7 @@ export type XiaohongshuMedia = z.infer<typeof xiaohongshuMediaSchema>;
 export type CreatePublishTaskInput = z.input<
 	typeof createPublishTaskInputSchema
 >;
-export type GenerateDraftInput = z.infer<typeof generateDraftInputSchema>;
+export type GenerateDraftInput = z.input<typeof generateDraftInputSchema>;
 export type NormalizedPublishTaskInput = z.output<
 	typeof createPublishTaskInputSchema
 >;

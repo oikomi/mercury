@@ -167,6 +167,18 @@ describe("XiaohongshuPublisher", () => {
 		expect(invalidateQueries).toHaveBeenCalled();
 	});
 
+	it("limits titles to the 20 characters accepted by Xiaohongshu", async () => {
+		const user = userEvent.setup();
+		renderPublisher();
+		const titleInput = screen.getByLabelText("标题") as HTMLInputElement;
+
+		expect(titleInput.maxLength).toBe(20);
+		await user.type(titleInput, "标".repeat(21));
+
+		expect(titleInput.value).toBe("标".repeat(20));
+		expect(screen.getByText("20/20")).toBeTruthy();
+	});
+
 	it("fills the form from a screenshot and publishes the generated media", async () => {
 		const user = userEvent.setup();
 		renderPublisher();

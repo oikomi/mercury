@@ -1,0 +1,98 @@
+- generic [active] [ref=f15e1]:
+  - link "跳到主要内容" [ref=f15e2] [cursor=pointer]:
+    - /url: "#main-content"
+  - main [ref=f15e3]:
+    - generic [ref=f15e4]:
+      - heading "Mercury 小红书发布台" [level=1] [ref=f15e7]:
+        - generic [ref=f15e8]: Mercury
+        - generic [ref=f15e9]: 小红书发布台
+      - region "发布账号" [ref=f15e10]:
+        - generic [ref=f15e11]:
+          - generic [ref=f15e15]:
+            - paragraph [ref=f15e16]: 我的小红书账号
+            - paragraph [ref=f15e17]: 发布账号
+          - generic [ref=f15e18]: 检查中…
+        - generic [ref=f15e20]:
+          - button "重新检测" [disabled]
+          - button "打开登录窗口" [disabled]
+      - generic [ref=f15e22]:
+        - generic [ref=f15e23]:
+          - generic [ref=f15e24]:
+            - generic [ref=f15e25]: 素材与 AI
+            - generic [ref=f15e29]: 内容截图
+            - generic [ref=f15e30]: AI · MAX
+          - region "AI 文案生成" [ref=f15e33]:
+            - generic [ref=f15e34]:
+              - button "粘贴截图" [ref=f15e35]:
+                - generic [ref=f15e37]: 在这里粘贴截图
+                - generic [ref=f15e38]: 支持 PNG、JPEG 或 WebP，最大 10 MB
+              - generic [ref=f15e40]:
+                - generic [ref=f15e41]:
+                  - generic [ref=f15e42]: 文案风格
+                  - combobox "文案风格" [ref=f15e43]:
+                    - generic [ref=f15e44]: 按日期轮换
+                    - img: ▼
+                  - textbox [ref=f15e45]: auto
+                - generic [ref=f15e46]:
+                  - generic [ref=f15e47]: 补充意图（可选）
+                  - group [ref=f15e48]:
+                    - textbox "补充意图（可选）" [ref=f15e49]:
+                      - /placeholder: 例如：轻松吐槽这次服务器故障…
+                    - group [ref=f15e50]: 0/500
+              - generic [ref=f15e51]:
+                - button "生成文案" [disabled]
+        - generic [ref=f15e52]:
+          - generic [ref=f15e53]:
+            - generic [ref=f15e54]: 发布内容
+            - generic [ref=f15e58]: 图文笔记
+            - generic [ref=f15e59]: 0/4 已就绪
+          - generic [ref=f15e62]:
+            - generic [ref=f15e63]:
+              - generic [ref=f15e64]: 标题
+              - group [ref=f15e65]:
+                - textbox "标题" [ref=f15e66]:
+                  - /placeholder: 输入笔记标题…
+                - group [ref=f15e67]
+                - group [ref=f15e71]: 0/20
+            - generic [ref=f15e72]:
+              - generic [ref=f15e73]: 正文
+              - group [ref=f15e74]:
+                - textbox "正文" [ref=f15e75]:
+                  - /placeholder: 输入正文…
+                - group [ref=f15e76]:
+                  - generic [ref=f15e77]: 0/5000
+            - generic [ref=f15e78]:
+              - generic [ref=f15e79]:
+                - generic [ref=f15e80]: 话题
+                - group [ref=f15e81]:
+                  - textbox "话题" [ref=f15e82]:
+                    - /placeholder: "例如：#咖啡 #探店…"
+                  - group [ref=f15e83]
+              - generic [ref=f15e87]:
+                - generic [ref=f15e88]: 可见性
+                - combobox "可见性" [ref=f15e89]:
+                  - generic [ref=f15e90]: 公开
+                  - img: ▼
+                - textbox [ref=f15e91]: public
+            - generic [ref=f15e92]:
+              - generic [ref=f15e93]: 本机媒体路径（可选）
+              - group [ref=f15e94]:
+                - textbox "本机媒体路径（可选）" [ref=f15e95]:
+                  - /placeholder: 例如：/Users/name/Pictures/note.png…
+                - group [ref=f15e96]
+          - generic [ref=f15e99]:
+            - generic [ref=f15e100]:
+              - generic [ref=f15e101]:
+                - generic [ref=f15e105]: 发布前检查
+                - generic [ref=f15e106]: 0/4
+              - list [ref=f15e108]:
+                - listitem [ref=f15e109]:
+                  - generic [ref=f15e110]: 标题
+                - listitem [ref=f15e111]:
+                  - generic [ref=f15e112]: 正文
+                - listitem [ref=f15e113]:
+                  - generic [ref=f15e114]: 媒体素材
+                - listitem [ref=f15e115]:
+                  - generic [ref=f15e116]: 账号会话
+            - button "发布到小红书" [disabled]
+  - region "Notifications alt+T"

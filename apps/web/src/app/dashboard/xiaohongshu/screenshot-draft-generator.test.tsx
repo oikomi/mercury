@@ -78,11 +78,37 @@ describe("ScreenshotDraftGenerator", () => {
 			expect(onGenerate).toHaveBeenCalledWith({
 				imageDataUrl: expect.stringMatching(PNG_DATA_URL_PATTERN),
 				intent: "轻松吐槽",
+				style: "auto",
 			});
 		});
 		expect(onGenerated).toHaveBeenCalledWith(generatedDraft);
 		expect(onMediaInvalidated).toHaveBeenCalledOnce();
 		expect(await screen.findByText("文案已生成")).toBeTruthy();
+	});
+
+	it("generates with a manually selected writing style", async () => {
+		const onGenerate = vi.fn(async () => generatedDraft);
+		const user = userEvent.setup();
+		render(
+			<ScreenshotDraftGenerator
+				disabled={false}
+				onGenerate={onGenerate}
+				onGenerated={vi.fn()}
+				onMediaInvalidated={vi.fn()}
+			/>
+		);
+
+		pasteFile(createPngFile());
+		await user.click(screen.getByLabelText("文案风格"));
+		await user.click(await screen.findByRole("option", { name: "轻吐槽" }));
+		await user.click(screen.getByRole("button", { name: "生成文案" }));
+
+		await waitFor(() => {
+			expect(onGenerate).toHaveBeenCalledWith({
+				imageDataUrl: expect.stringMatching(PNG_DATA_URL_PATTERN),
+				style: "dry_humor",
+			});
+		});
 	});
 
 	it("rejects unsupported clipboard files", async () => {

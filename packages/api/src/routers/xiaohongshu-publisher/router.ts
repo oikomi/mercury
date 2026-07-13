@@ -1,7 +1,7 @@
 import { env } from "@mercury/env/server";
 import { z } from "zod";
 
-import { protectedProcedure, router } from "../../index";
+import { publicProcedure, router } from "../../index";
 import {
 	createXiaohongshuAiDraftGenerator,
 	type XiaohongshuAiDraftGenerator,
@@ -22,6 +22,7 @@ import {
 const listTasksInputSchema = z.object({
 	limit: z.number().int().min(1).max(50).default(20),
 });
+const LOCAL_PUBLISHER_USER_ID = "mercury-local-publisher";
 
 export const createXiaohongshuPublisherRouter = (
 	service: XiaohongshuPublisherService = createXiaohongshuPublisherService({
@@ -36,37 +37,37 @@ export const createXiaohongshuPublisherRouter = (
 	)
 ) =>
 	router({
-		createTask: protectedProcedure
+		createTask: publicProcedure
 			.input(createPublishTaskInputSchema)
-			.mutation(({ ctx, input }) =>
-				service.createTask(ctx.session.user.id, input)
+			.mutation(({ input }) =>
+				service.createTask(LOCAL_PUBLISHER_USER_ID, input)
 			),
-		generateDraft: protectedProcedure
+		generateDraft: publicProcedure
 			.input(generateDraftInputSchema)
 			.mutation(({ input }) => aiDraftGenerator.generate(input)),
-		getAccountStatus: protectedProcedure.query(({ ctx }) =>
-			service.getAccountStatus(ctx.session.user.id)
+		getAccountStatus: publicProcedure.query(() =>
+			service.getAccountStatus(LOCAL_PUBLISHER_USER_ID)
 		),
-		getTask: protectedProcedure
+		getTask: publicProcedure
 			.input(getTaskInputSchema)
-			.query(({ ctx, input }) =>
-				service.getTask(ctx.session.user.id, input.taskId)
+			.query(({ input }) =>
+				service.getTask(LOCAL_PUBLISHER_USER_ID, input.taskId)
 			),
-		listTasks: protectedProcedure
+		listTasks: publicProcedure
 			.input(listTasksInputSchema)
-			.query(({ ctx, input }) =>
-				service.listTasks(ctx.session.user.id, input.limit)
+			.query(({ input }) =>
+				service.listTasks(LOCAL_PUBLISHER_USER_ID, input.limit)
 			),
-		publishTask: protectedProcedure
+		publishTask: publicProcedure
 			.input(publishTaskInputSchema)
-			.mutation(({ ctx, input }) =>
-				service.publishTask(ctx.session.user.id, input.taskId)
+			.mutation(({ input }) =>
+				service.publishTask(LOCAL_PUBLISHER_USER_ID, input.taskId)
 			),
-		refreshAccountStatus: protectedProcedure.mutation(({ ctx }) =>
-			service.refreshAccountStatus(ctx.session.user.id)
+		refreshAccountStatus: publicProcedure.mutation(() =>
+			service.refreshAccountStatus(LOCAL_PUBLISHER_USER_ID)
 		),
-		startLogin: protectedProcedure.mutation(({ ctx }) =>
-			service.startLogin(ctx.session.user.id)
+		startLogin: publicProcedure.mutation(() =>
+			service.startLogin(LOCAL_PUBLISHER_USER_ID)
 		),
 	});
 

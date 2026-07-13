@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 
+import { XIAOHONGSHU_TITLE_MAX_LENGTH } from "./constants";
 import {
 	createPublishTaskInputSchema,
 	generateDraftInputSchema,
@@ -22,6 +23,33 @@ describe("generateDraftInputSchema", () => {
 		});
 
 		expect(result.intent).toBe("轻松吐槽服务器故障");
+		expect(result.style).toBe("auto");
+	});
+
+	it.each([
+		"auto",
+		"chatty",
+		"notes",
+		"story",
+		"observational",
+		"dry_humor",
+		"gentle",
+	] as const)("accepts the %s draft style", (style) => {
+		const result = generateDraftInputSchema.parse({
+			imageDataUrl: "data:image/png;base64,iVBORw0KGgo=",
+			style,
+		});
+
+		expect(result.style).toBe(style);
+	});
+
+	it("rejects an unknown draft style", () => {
+		expect(
+			generateDraftInputSchema.safeParse({
+				imageDataUrl: "data:image/png;base64,iVBORw0KGgo=",
+				style: "viral_template",
+			}).success
+		).toBe(false);
 	});
 
 	it.each([
@@ -85,6 +113,36 @@ describe("createPublishTaskInputSchema", () => {
 		});
 
 		expect(result.success).toBe(false);
+	});
+
+	it("enforces Xiaohongshu's 20-character title limit", () => {
+		const payload = {
+			content: "正文内容",
+			media: [
+				{
+					mimeType: "image/png",
+					name: "cover.png",
+					path: "/tmp/cover.png",
+					size: 1024,
+					type: "image" as const,
+				},
+			],
+			topics: [],
+			visibility: "public" as const,
+		};
+
+		expect(
+			createPublishTaskInputSchema.safeParse({
+				...payload,
+				title: "标".repeat(XIAOHONGSHU_TITLE_MAX_LENGTH),
+			}).success
+		).toBe(true);
+		expect(
+			createPublishTaskInputSchema.safeParse({
+				...payload,
+				title: "标".repeat(XIAOHONGSHU_TITLE_MAX_LENGTH + 1),
+			}).success
+		).toBe(false);
 	});
 
 	it.each([

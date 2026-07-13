@@ -9,6 +9,7 @@
     "ignoreUnknown": false,
     "includes": [
       "!**/.next",
+      "!**/.data",
       "!**/dist",
       "!**/.turbo",
       "!**/.nx",
@@ -20,6 +21,7 @@
       "!**/.zed",
       "!**/.vscode",
       "!**/routeTree.gen.ts",
+      "!**/expo-env.d.ts",
       "!**/src-tauri",
       "!**/.nuxt",
       "!bts.jsonc",

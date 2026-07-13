@@ -4,10 +4,80 @@ import { describe, expect, it, vi } from "vitest";
 import {
 	clickPublish,
 	fillDescription,
+	fillTitle,
+	fillTopics,
 	getCreatorPublishUrl,
+	getSessionStatus,
+	isCreatorLoginUrl,
 	resolvePublishConfirmation,
 	uploadMedia,
 } from "./playwright-provider";
+
+describe("getSessionStatus", () => {
+	it("prefers a rendered account over a transient login URL", async () => {
+		const isVisible = vi.fn().mockResolvedValue(true);
+		const textContent = vi.fn().mockResolvedValue(" 肥熊 ");
+		const page = {
+			getByText: vi.fn(() => ({ first: () => ({ isVisible }) })),
+			locator: vi.fn(() => ({ first: () => ({ isVisible, textContent }) })),
+			url: () => "https://creator.xiaohongshu.com/login",
+		} as unknown as Page;
+
+		const status = await getSessionStatus(page, "/tmp/xhs-profile");
+
+		expect(status).toEqual({
+			displayName: "肥熊",
+			profilePath: "/tmp/xhs-profile",
+			status: "ready",
+		});
+		expect(page.locator).toHaveBeenCalledWith(".user-info .name-box");
+	});
+
+	it("waits for a cached session to redirect away from the login form", async () => {
+		const waitForTimeout = vi.fn().mockResolvedValue(undefined);
+		const page = {
+			getByText: vi
+				.fn()
+				.mockReturnValueOnce({
+					first: () => ({ isVisible: vi.fn().mockResolvedValue(false) }),
+				})
+				.mockReturnValueOnce({
+					first: () => ({ isVisible: vi.fn().mockResolvedValue(true) }),
+				}),
+			locator: vi
+				.fn()
+				.mockReturnValueOnce({
+					first: () => ({ isVisible: vi.fn().mockResolvedValue(false) }),
+				})
+				.mockReturnValueOnce({
+					first: () => ({
+						isVisible: vi.fn().mockResolvedValue(true),
+						textContent: vi.fn().mockResolvedValue("肥熊"),
+					}),
+				}),
+			url: () => "https://creator.xiaohongshu.com/login",
+			waitForTimeout,
+		} as unknown as Page;
+
+		const status = await getSessionStatus(page, "/tmp/xhs-profile");
+
+		expect(status.status).toBe("ready");
+		expect(status.displayName).toBe("肥熊");
+		expect(waitForTimeout).toHaveBeenCalledWith(5000);
+	});
+});
+
+describe("isCreatorLoginUrl", () => {
+	it("recognizes only Xiaohongshu creator login routes", () => {
+		expect(isCreatorLoginUrl("https://creator.xiaohongshu.com/login")).toBe(
+			true
+		);
+		expect(
+			isCreatorLoginUrl("https://creator.xiaohongshu.com/publish/publish")
+		).toBe(false);
+		expect(isCreatorLoginUrl("https://example.com/login")).toBe(false);
+	});
+});
 
 describe("resolvePublishConfirmation", () => {
 	it("does not treat the creator portal URL as a successful publish", () => {
@@ -97,6 +167,110 @@ describe("fillDescription", () => {
 		expect(fill).toHaveBeenCalledWith("自动填写正文", {
 			timeout: 30_000,
 		});
+	});
+});
+
+describe("fillTopics", () => {
+	it("selects exact topic suggestions so the editor creates linked topic entities", async () => {
+		const press = vi.fn().mockResolvedValue(undefined);
+		const pressSequentially = vi.fn().mockResolvedValue(undefined);
+		const linkedTopicWaitFor = vi.fn().mockResolvedValue(undefined);
+		const linkedTopics = {
+			count: vi.fn().mockResolvedValueOnce(0).mockResolvedValueOnce(1),
+			nth: vi.fn(() => ({ waitFor: linkedTopicWaitFor })),
+		};
+		const editor = {
+			locator: vi.fn(() => linkedTopics),
+			press,
+			pressSequentially,
+		};
+		const topicButtonClick = vi.fn().mockResolvedValue(undefined);
+		const suggestionClick = vi.fn().mockResolvedValue(undefined);
+		const suggestionWaitFor = vi.fn().mockResolvedValue(undefined);
+		const first = vi.fn(() => ({
+			click: suggestionClick,
+			waitFor: suggestionWaitFor,
+		}));
+		const getByText = vi.fn(() => ({ first }));
+		const locator = vi.fn((selector: string) => {
+			if (selector === '[contenteditable="true"]') {
+				return { first: () => editor };
+			}
+
+			if (selector === "#topicBtn") {
+				return { click: topicButtonClick };
+			}
+
+			return { getByText };
+		});
+		const page = { locator } as unknown as Page;
+
+		await fillTopics(page, ["职场", "产品经理"]);
+
+		expect(press).toHaveBeenNthCalledWith(1, "Enter");
+		expect(press).toHaveBeenNthCalledWith(2, "Enter");
+		expect(topicButtonClick).toHaveBeenCalledTimes(2);
+		expect(pressSequentially).toHaveBeenNthCalledWith(1, "职场", {
+			delay: 80,
+		});
+		expect(pressSequentially).toHaveBeenNthCalledWith(2, "产品经理", {
+			delay: 80,
+		});
+		expect(getByText).toHaveBeenNthCalledWith(1, "#职场", { exact: true });
+		expect(getByText).toHaveBeenNthCalledWith(2, "#产品经理", {
+			exact: true,
+		});
+		expect(suggestionClick).toHaveBeenCalledTimes(2);
+		expect(linkedTopicWaitFor).toHaveBeenCalledTimes(2);
+	});
+
+	it("rejects a missing exact topic instead of publishing plain hashtag text", async () => {
+		const editor = {
+			locator: vi.fn(() => ({ count: vi.fn().mockResolvedValue(0) })),
+			press: vi.fn().mockResolvedValue(undefined),
+			pressSequentially: vi.fn().mockResolvedValue(undefined),
+		};
+		const missingSuggestion = {
+			first: () => ({
+				waitFor: vi.fn().mockRejectedValue(new Error("not found")),
+			}),
+		};
+		const page = {
+			locator: vi.fn((selector: string) => {
+				if (selector === '[contenteditable="true"]') {
+					return { first: () => editor };
+				}
+
+				if (selector === "#topicBtn") {
+					return { click: vi.fn().mockResolvedValue(undefined) };
+				}
+
+				return { getByText: () => missingSuggestion };
+			}),
+		} as unknown as Page;
+
+		await expect(fillTopics(page, ["不存在的话题"])).rejects.toThrow(
+			"小红书没有找到完全匹配的话题“不存在的话题”"
+		);
+	});
+});
+
+describe("fillTitle", () => {
+	it("fills valid titles and rejects overlong titles before opening the form", async () => {
+		const fill = vi.fn().mockResolvedValue(undefined);
+		const page = {
+			getByPlaceholder: vi.fn(() => ({
+				first: () => ({ fill }),
+			})),
+		} as unknown as Page;
+
+		await fillTitle(page, " 合规标题 ");
+
+		expect(fill).toHaveBeenCalledWith("合规标题", { timeout: 30_000 });
+		await expect(fillTitle(page, "标".repeat(21))).rejects.toThrow(
+			"小红书标题最多 20 个字符"
+		);
+		expect(fill).toHaveBeenCalledOnce();
 	});
 });
 

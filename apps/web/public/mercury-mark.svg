@@ -1,0 +1,64 @@
+<svg
+	aria-labelledby="title"
+	height="64"
+	role="img"
+	viewBox="0 0 64 64"
+	width="64"
+	xmlns="http://www.w3.org/2000/svg"
+>
+	<title id="title">Mercury</title>
+	<defs>
+		<linearGradient
+			gradientUnits="userSpaceOnUse"
+			id="surface"
+			x1="10"
+			x2="54"
+			y1="8"
+			y2="57"
+		>
+			<stop stop-color="#ff4d5f" />
+			<stop offset="1" stop-color="#e8003d" />
+		</linearGradient>
+		<filter height="140%" id="shadow" width="140%" x="-20%" y="-20%">
+			<feDropShadow
+				dx="0"
+				dy="3"
+				flood-color="#73001f"
+				flood-opacity="0.25"
+				stdDeviation="3"
+			/>
+		</filter>
+	</defs>
+	<rect
+		fill="url(#surface)"
+		filter="url(#shadow)"
+		height="56"
+		rx="16"
+		width="56"
+		x="4"
+		y="4"
+	/>
+	<path
+		d="M9.5 35.5C16.5 50 40.5 53 53 37.5C57.5 32 57.5 25.5 53.5 20"
+		fill="none"
+		stroke="#ffba52"
+		stroke-linecap="round"
+		stroke-width="3"
+	/>
+	<path
+		d="M16 42V22L32 38L48 22V42"
+		fill="none"
+		stroke="#fff"
+		stroke-linecap="round"
+		stroke-linejoin="round"
+		stroke-width="5"
+	/>
+	<circle
+		cx="53.5"
+		cy="20"
+		fill="#ffba52"
+		r="4.5"
+		stroke="#fff"
+		stroke-width="2"
+	/>
+</svg>

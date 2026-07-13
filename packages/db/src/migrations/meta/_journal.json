@@ -15,6 +15,20 @@
       "when": 1783602399728,
       "tag": "0001_wild_epoch",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1783868212226,
+      "tag": "0002_local_publisher_workspace",
+      "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "7",
+      "when": 1783869453508,
+      "tag": "0003_remove_mock_xhs_accounts",
+      "breakpoints": true
     }
   ]
 }

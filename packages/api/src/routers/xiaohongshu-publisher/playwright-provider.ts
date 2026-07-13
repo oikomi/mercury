@@ -4,10 +4,12 @@ import path from "node:path";
 import {
 	type BrowserContext,
 	chromium,
+	type Locator,
 	type Page,
 	type Request,
 } from "playwright";
 
+import { XIAOHONGSHU_TITLE_MAX_LENGTH } from "./constants";
 import type {
 	XiaohongshuPublishInput,
 	XiaohongshuPublishProvider,
@@ -42,21 +44,40 @@ const PUBLIC_SITE_URL = "https://www.xiaohongshu.com/";
 const LOGIN_TIMEOUT_MS = 180_000;
 const PAGE_TIMEOUT_MS = 30_000;
 const RESULT_TIMEOUT_MS = 15_000;
+const SESSION_REDIRECT_GRACE_MS = 5000;
 const CREATOR_API_IDLE_MS = 1500;
 const CREATOR_API_IDLE_TIMEOUT_MS = 15_000;
 const CREATOR_API_IDLE_POLL_MS = 100;
 const SAFE_FILE_NAME_PATTERN = /[^a-zA-Z0-9_-]/gu;
 const TRAILING_SLASH_PATTERN = /\/$/u;
+const LOGIN_PATH_PATTERN = /^\/login(?:\/|$)/u;
 const PUBLIC_NOTE_PATH_PATTERN = /^\/explore\/[a-zA-Z0-9_-]+\/?$/u;
 const PUBLIC_NOTE_URL_PATTERN =
 	/^https:\/\/(?:www\.)?xiaohongshu\.com\/explore\/[a-zA-Z0-9_-]+/u;
-const LOGIN_TEXT_PATTERN = /扫码登录|手机号登录|登录后即可|请登录/u;
+const LOGIN_TEXT_PATTERN = /扫码登录|手机号登录|短信登录|登录后即可|请登录/u;
 const READY_TEXT_PATTERN = /发布笔记|发布管理|数据看板|创作中心/u;
 const SUCCESS_TEXT_PATTERN = /发布成功|笔记发布成功|提交成功/u;
 const VISIBILITY_TRIGGER_PATTERN = /公开可见|公开|可见范围/u;
 const TITLE_PLACEHOLDER_PATTERN = /填写标题|标题/u;
 const RESULT_LINK_PATTERN = /查看笔记|查看作品|查看详情/u;
+const ACCOUNT_NAME_SELECTOR = ".user-info .name-box";
+const DESCRIPTION_EDITOR_SELECTOR = '[contenteditable="true"]';
+const TOPIC_BUTTON_SELECTOR = "#topicBtn";
+const TOPIC_SUGGESTION_CONTAINER_SELECTOR = "#creator-editor-topic-container";
+const TOPIC_LINK_SELECTOR = "a.tiptap-topic[data-topic]";
+const TOPIC_TYPING_DELAY_MS = 80;
 const TRACKED_REQUEST_TYPES = new Set(["fetch", "xhr"]);
+
+export const isCreatorLoginUrl = (candidate: string): boolean => {
+	try {
+		const url = new URL(candidate);
+		return (
+			url.hostname === CREATOR_API_HOST && LOGIN_PATH_PATTERN.test(url.pathname)
+		);
+	} catch {
+		return false;
+	}
+};
 
 const normalizePublicNoteUrl = (candidate: string | null): string | null => {
 	if (!candidate) {
@@ -103,28 +124,26 @@ export const resolvePublishConfirmation = ({
 	};
 };
 
-const buildDescription = (input: XiaohongshuPublishInput): string => {
-	const topicText = input.topics.map((topic) => `#${topic}`).join(" ");
-	return [input.content, topicText].filter(Boolean).join("\n\n");
-};
-
 export const getCreatorPublishUrl = (mediaType: "image" | "video"): string =>
 	`https://creator.xiaohongshu.com/publish/publish?from=homepage&target=${mediaType}`;
 
-const getSessionStatus = async (
+const getReadySessionStatus = async (
 	page: Page,
 	profilePath: string
-): Promise<XiaohongshuSessionStatus> => {
-	const loginVisible = await page
-		.getByText(LOGIN_TEXT_PATTERN)
-		.first()
+): Promise<XiaohongshuSessionStatus | null> => {
+	const accountNameLocator = page.locator(ACCOUNT_NAME_SELECTOR).first();
+	const accountNameVisible = await accountNameLocator
 		.isVisible()
 		.catch(() => false);
-	if (loginVisible) {
+	if (accountNameVisible) {
+		const accountName = await accountNameLocator
+			.textContent()
+			.catch(() => null);
+
 		return {
-			displayName: null,
+			displayName: accountName?.trim() || null,
 			profilePath,
-			status: "login_required",
+			status: "ready",
 		};
 	}
 
@@ -133,18 +152,69 @@ const getSessionStatus = async (
 		.first()
 		.isVisible()
 		.catch(() => false);
+	if (!readyVisible) {
+		return null;
+	}
 
 	return {
 		displayName: null,
 		profilePath,
-		status: readyVisible ? "ready" : "error",
+		status: "ready",
+	};
+};
+
+const waitForReadySessionUi = async (
+	page: Page,
+	timeout: number
+): Promise<void> => {
+	await Promise.any([
+		page
+			.locator(ACCOUNT_NAME_SELECTOR)
+			.first()
+			.waitFor({ state: "visible", timeout }),
+		page.getByText(READY_TEXT_PATTERN).first().waitFor({ timeout }),
+	]);
+};
+
+export const getSessionStatus = async (
+	page: Page,
+	profilePath: string
+): Promise<XiaohongshuSessionStatus> => {
+	const readySession = await getReadySessionStatus(page, profilePath);
+	if (readySession) {
+		return readySession;
+	}
+
+	const loginVisible = await page
+		.getByText(LOGIN_TEXT_PATTERN)
+		.first()
+		.isVisible()
+		.catch(() => false);
+	if (isCreatorLoginUrl(page.url()) || loginVisible) {
+		await page.waitForTimeout(SESSION_REDIRECT_GRACE_MS);
+		const redirectedSession = await getReadySessionStatus(page, profilePath);
+		if (redirectedSession) {
+			return redirectedSession;
+		}
+
+		return {
+			displayName: null,
+			profilePath,
+			status: "login_required",
+		};
+	}
+
+	return {
+		displayName: null,
+		profilePath,
+		status: "error",
 	};
 };
 
 const waitForSessionUi = async (page: Page, timeout: number): Promise<void> => {
 	await Promise.any([
+		waitForReadySessionUi(page, timeout),
 		page.getByText(LOGIN_TEXT_PATTERN).first().waitFor({ timeout }),
-		page.getByText(READY_TEXT_PATTERN).first().waitFor({ timeout }),
 	]).catch(() => undefined);
 };
 
@@ -172,9 +242,73 @@ export const fillDescription = async (
 	description: string
 ): Promise<void> => {
 	await page
-		.locator('[contenteditable="true"]')
+		.locator(DESCRIPTION_EDITOR_SELECTOR)
 		.first()
 		.fill(description, { timeout: PAGE_TIMEOUT_MS });
+};
+
+const insertLinkedTopic = async (
+	page: Page,
+	editor: Locator,
+	topic: string
+): Promise<void> => {
+	const linkedTopicCount = await editor.locator(TOPIC_LINK_SELECTOR).count();
+	await page.locator(TOPIC_BUTTON_SELECTOR).click({ timeout: PAGE_TIMEOUT_MS });
+	await editor.pressSequentially(topic, { delay: TOPIC_TYPING_DELAY_MS });
+
+	const exactSuggestion = page
+		.locator(TOPIC_SUGGESTION_CONTAINER_SELECTOR)
+		.getByText(`#${topic}`, { exact: true })
+		.first();
+	try {
+		await exactSuggestion.waitFor({
+			state: "visible",
+			timeout: PAGE_TIMEOUT_MS,
+		});
+	} catch (error) {
+		throw new Error(
+			`小红书没有找到完全匹配的话题“${topic}”，请更换话题后重试。`,
+			{ cause: error }
+		);
+	}
+
+	await exactSuggestion.click({ timeout: PAGE_TIMEOUT_MS });
+	await editor
+		.locator(TOPIC_LINK_SELECTOR)
+		.nth(linkedTopicCount)
+		.waitFor({ state: "attached", timeout: PAGE_TIMEOUT_MS });
+};
+
+export const fillTopics = async (
+	page: Page,
+	topics: readonly string[]
+): Promise<void> => {
+	if (topics.length === 0) {
+		return;
+	}
+
+	const editor = page.locator(DESCRIPTION_EDITOR_SELECTOR).first();
+	await editor.press("Enter");
+	await editor.press("Enter");
+
+	for (const topic of topics) {
+		// biome-ignore lint/performance/noAwaitInLoops: each selection mutates the same editor state.
+		await insertLinkedTopic(page, editor, topic);
+	}
+};
+
+export const fillTitle = async (page: Page, title: string): Promise<void> => {
+	const normalizedTitle = title.trim();
+	if (normalizedTitle.length > XIAOHONGSHU_TITLE_MAX_LENGTH) {
+		throw new Error(
+			`小红书标题最多 ${XIAOHONGSHU_TITLE_MAX_LENGTH} 个字符，当前为 ${normalizedTitle.length} 个字符。`
+		);
+	}
+
+	await page
+		.getByPlaceholder(TITLE_PLACEHOLDER_PATTERN)
+		.first()
+		.fill(normalizedTitle, { timeout: PAGE_TIMEOUT_MS });
 };
 
 const getCdpNodeChildren = (node: CdpDomNode): CdpDomNode[] => [
@@ -364,11 +498,9 @@ const fillAndSubmitPublishForm = async (
 ): Promise<void> => {
 	await runAndWaitForCreatorApiIdle(page, async () => {
 		await uploadMedia(page, input.media);
-		await page
-			.getByPlaceholder(TITLE_PLACEHOLDER_PATTERN)
-			.first()
-			.fill(input.title, { timeout: PAGE_TIMEOUT_MS });
-		await fillDescription(page, buildDescription(input));
+		await fillTitle(page, input.title);
+		await fillDescription(page, input.content);
+		await fillTopics(page, input.topics);
 		await applyVisibility(page, input.visibility);
 		await page
 			.locator('xhs-publish-btn[submit-disabled="false"]')
@@ -410,7 +542,9 @@ export function createPlaywrightXiaohongshuPublishProvider(
 		await mkdir(options.profileDir, { recursive: true });
 
 		return chromium.launchPersistentContext(options.profileDir, {
+			args: ["--deny-permission-prompts"],
 			channel: "chrome",
+			chromiumSandbox: true,
 			headless,
 			viewport: { height: 900, width: 1440 },
 		});
@@ -427,7 +561,8 @@ export function createPlaywrightXiaohongshuPublishProvider(
 	const checkSession = async (): Promise<XiaohongshuSessionStatus> => {
 		let context: BrowserContext | undefined;
 		try {
-			context = await openContext(true);
+			// Xiaohongshu can report a different session for the same profile in headless mode.
+			context = await openContext(false);
 			const page = context.pages()[0] ?? (await context.newPage());
 			await page.goto(CREATOR_URL, {
 				timeout: PAGE_TIMEOUT_MS,
@@ -435,7 +570,7 @@ export function createPlaywrightXiaohongshuPublishProvider(
 			});
 			await waitForSessionUi(page, PAGE_TIMEOUT_MS);
 
-			return getSessionStatus(page, options.profileDir);
+			return await getSessionStatus(page, options.profileDir);
 		} catch {
 			return {
 				displayName: null,
@@ -536,13 +671,11 @@ export function createPlaywrightXiaohongshuPublishProvider(
 					return initialStatus;
 				}
 
-				await page
-					.getByText(READY_TEXT_PATTERN)
-					.first()
-					.waitFor({ timeout: LOGIN_TIMEOUT_MS })
-					.catch(() => undefined);
+				await waitForReadySessionUi(page, LOGIN_TIMEOUT_MS).catch(
+					() => undefined
+				);
 
-				return getSessionStatus(page, options.profileDir);
+				return await getSessionStatus(page, options.profileDir);
 			} catch {
 				return {
 					displayName: null,
